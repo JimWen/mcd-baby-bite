@@ -21,7 +21,7 @@
 - 钠计算只用官方营养数据，匹配不到就标注"无官方营养数据"，不估算
 - 文案禁止：与其他品牌比较、贬低麦当劳、"不健康 / 最健康 / 营养均衡 / 绝对安全"等措辞
 - 测试命令：`python3 -m unittest discover -s tests -v`（在仓库根目录 `/Users/wenzhou/code/my/mc/mcd-baby-bite` 执行）
-- **执行者不做 git commit**；每个任务结束时全部测试通过即可，由控制者验收后分期提交（格式 `<type>(<scope>): <description>`，不加署名行）
+- 每个任务完成且全部测试通过后，执行者提交一次（分期提交）：`git add` 本任务文件后 `git commit -m "<type>(<scope>): <中文描述>"`，例如 `feat(client): 实现麦当劳 MCP 客户端与离线回放`；**不加任何署名 / Co-Authored-By 行**；不改 git 配置，不 push
 - 不得修改 `fixtures/real/` 中已有文件（真实录制数据）
 - 新功能的可选外部依赖（浏览器、小红书 MCP、高德 Key）缺失时必须优雅降级：给出提示，不影响定制单主流程
 
@@ -2301,7 +2301,7 @@ def render_html(result: PlanResult) -> str:
 - [ ] **Step 4: 运行确认通过**
 
 Run: `python3 -m unittest tests.test_cards -v`
-Expected: 11 tests OK
+Expected: 10 tests OK
 
 ---
 
