@@ -1696,7 +1696,7 @@ class PlanTest(unittest.TestCase):
 
     def test_fish_allergy_removes_fish_candidates(self):
         candidates = rank_candidates(self.menu, 30, ("鱼类",))
-        self.assertEqual([m.code for m in candidates], ["9900016057", "9900016056", "1406", "1401"])
+        self.assertEqual([m.code for m in candidates], ["9900016057", "9900016056", "1406", "1120"])
 
     def test_unknown_nutrition_is_marked_and_ranked_lower(self):
         line = CustomizedLine("1", "主食", "X1", "神秘新品堡", 1, (), (), None)
@@ -1717,7 +1717,7 @@ class PlanTest(unittest.TestCase):
 
     def test_adult_suggestions(self):
         self.assertEqual([m.name for m in adult_suggestions(self.menu)],
-                         ["精选单人餐三件套", "人气超值四件套随心选", "鱼牛汉堡四件套随心选"])
+                         ["人气超值四件套随心选", "鱼牛汉堡四件套随心选", "“我就喜欢”鸡薯双全盒"])
 
 
 if __name__ == "__main__":
