@@ -1,0 +1,17 @@
+{
+ "tool": "maps_direction_walking",
+ "args": {
+  "origin": "121.477401,31.240093",
+  "destination": "121.475509,31.233694"
+ },
+ "recordedAt": "2026-10-12",
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"route\":{\"origin\":\"121.477401,31.240093\",\"destination\":\"121.475509,31.233694\",\"paths\":[{\"distance\":938,\"duration\":750,\"steps\":[{\"instruction\":\"沿厦门路向西步行85米左转\",\"road\":\"厦门路\",\"distance\":85,\"orientation\":\"西\",\"duration\":68},{\"instruction\":\"沿浙江中路向南步行187米右转\",\"road\":\"浙江中路\",\"distance\":187,\"orientation\":\"南\",\"duration\":150},{\"instruction\":\"沿芝罘路向西步行113米左转\",\"road\":\"芝罘路\",\"distance\":113,\"orientation\":\"西\",\"duration\":90},{\"instruction\":\"沿贵州路向南步行402米右转\",\"road\":\"贵州路\",\"distance\":402,\"orientation\":\"南\",\"duration\":322},{\"instruction\":\"沿九江路向西步行132米左转\",\"road\":\"九江路\",\"distance\":132,\"orientation\":\"西\",\"duration\":106},{\"instruction\":\"向东南步行19米到达目的地\",\"road\":\"\",\"distance\":19,\"orientation\":\"东南\",\"duration\":15}]}]}}"
+   }
+  ],
+  "isError": false
+ }
+}

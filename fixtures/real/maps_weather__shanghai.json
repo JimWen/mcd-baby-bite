@@ -1,0 +1,16 @@
+{
+ "tool": "maps_weather",
+ "args": {
+  "city": "上海市"
+ },
+ "recordedAt": "2026-10-12",
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"city\":\"上海市\",\"forecasts\":[{\"date\":\"2026-10-12\",\"week\":\"1\",\"dayweather\":\"阴\",\"nightweather\":\"多云\",\"daytemp\":\"26\",\"nighttemp\":\"19\",\"daywind\":\"北\",\"nightwind\":\"北\",\"daypower\":\"1-3\",\"nightpower\":\"1-3\",\"daytemp_float\":\"26.0\",\"nighttemp_float\":\"19.0\"},{\"date\":\"2026-10-13\",\"week\":\"2\",\"dayweather\":\"多云\",\"nightweather\":\"晴\",\"daytemp\":\"26\",\"nighttemp\":\"19\",\"daywind\":\"北\",\"nightwind\":\"北\",\"daypower\":\"1-3\",\"nightpower\":\"1-3\",\"daytemp_float\":\"26.0\",\"nighttemp_float\":\"19.0\"},{\"date\":\"2026-10-14\",\"week\":\"3\",\"dayweather\":\"晴\",\"nightweather\":\"阴\",\"daytemp\":\"25\",\"nighttemp\":\"18\",\"daywind\":\"东北\",\"nightwind\":\"东北\",\"daypower\":\"1-3\",\"nightpower\":\"1-3\",\"daytemp_float\":\"25.0\",\"nighttemp_float\":\"18.0\"},{\"date\":\"2026-10-15\",\"week\":\"4\",\"dayweather\":\"阴\",\"nightweather\":\"小雨\",\"daytemp\":\"24\",\"nighttemp\":\"20\",\"daywind\":\"东\",\"nightwind\":\"东\",\"daypower\":\"1-3\",\"nightpower\":\"1-3\",\"daytemp_float\":\"24.0\",\"nighttemp_float\":\"20.0\"}]}"
+   }
+  ],
+  "isError": false
+ }
+}

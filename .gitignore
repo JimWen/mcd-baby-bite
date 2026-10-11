@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+/plan*.json
+/cards/
+/out/
+*.html
+!docs/index.html

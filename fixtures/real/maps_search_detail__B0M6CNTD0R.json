@@ -1,0 +1,16 @@
+{
+ "tool": "maps_search_detail",
+ "args": {
+  "id": "B0M6CNTD0R"
+ },
+ "recordedAt": "2026-10-12",
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"id\":\"B0M6CNTD0R\",\"name\":\"麦当劳(华旭国际大厦店)\",\"location\":\"121.475509,31.233694\",\"address\":\"九江路769号华旭国际大厦F1层\",\"business_area\":\"北京路\",\"city\":\"上海市\",\"type\":\"餐饮服务;快餐厅;麦当劳\",\"alias\":\"\",\"photo\":\"https://aos-comment.amap.com/B0M6CNTD0R/comment/946AE103_76B0_426E_9B00_D71C51778A67_L0_001_1420_200_1772922367725_63678929.jpg\",\"cost\":\"28.00\",\"opentime2\":\"周一至周日 07:00-23:00\",\"rating\":\"4.4\",\"open_time\":\"07:00-23:00\",\"meal_ordering\":\"0\"}"
+   }
+  ],
+  "isError": false
+ }
+}

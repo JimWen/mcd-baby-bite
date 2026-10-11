@@ -1,0 +1,17 @@
+{
+ "tool": "maps_geo",
+ "args": {
+  "address": "人民广场",
+  "city": "上海市"
+ },
+ "recordedAt": "2026-10-12",
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"results\":[{\"country\":\"中国\",\"province\":\"上海市\",\"city\":\"上海市\",\"citycode\":\"021\",\"district\":\"黄浦区\",\"street\":\"人民广场\",\"number\":[],\"adcode\":\"310101\",\"location\":\"121.477401,31.240093\",\"level\":\"道路\"}]}"
+   }
+  ],
+  "isError": false
+ }
+}

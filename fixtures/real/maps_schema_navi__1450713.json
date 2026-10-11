@@ -1,0 +1,17 @@
+{
+ "tool": "maps_schema_navi",
+ "args": {
+  "lon": "121.475509",
+  "lat": "31.233694"
+ },
+ "recordedAt": "2026-10-12",
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "amapuri://navi?sourceApplication=amap_mcp&lon=121.475509&lat=31.233694&dev=1&style=2"
+   }
+  ],
+  "isError": false
+ }
+}
