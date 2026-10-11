@@ -3648,8 +3648,11 @@ class McpHttpClient:
                     session_id = resp.headers.get("Mcp-Session-Id")
                     if session_id:
                         self._session_id = session_id
-                    return resp.read().decode("utf-8"), resp.headers.get("Content-Type", "")
+                    # 在唯一入口对整个响应体脱敏：之后任何解析错误、业务错误都不会带出凭证
+                    return self._mask(resp.read().decode("utf-8")), resp.headers.get("Content-Type", "")
             except urllib.error.HTTPError as exc:
+                detail = self._mask(exc.read().decode("utf-8", "replace"))[:200]  # 先脱敏再截断
+                exc.close()
                 if exc.code == 401:
                     raise AuthError(f"MCP 服务鉴权失败（HTTP 401）{self.auth_hint}") from None
                 if exc.code == 429:
@@ -3658,8 +3661,7 @@ class McpHttpClient:
                         delay *= 2
                         continue
                     raise RateLimitError("触发限流（HTTP 429），请稍后再试") from None
-                detail = exc.read().decode("utf-8", "replace")[:200]
-                raise TransportError(self._mask(f"HTTP {exc.code}：{detail}")) from None
+                raise TransportError(f"HTTP {exc.code}：{detail}") from None
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as exc:
                 if attempt < attempts:
                     self._sleep(delay)
