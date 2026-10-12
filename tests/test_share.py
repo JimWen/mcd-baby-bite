@@ -50,6 +50,7 @@ class NoteTest(unittest.TestCase):
         for phrase in BANNED_PHRASES:
             self.assertNotIn(phrase, note["content"])
         self.assertIn("宝宝外出吃饭", note["tags"])
+        self.assertIn("参考《中国居民膳食指南（2022）》", note["content"])  # 1-2 岁的依据
 
     def test_draft_lists_images(self):
         note = {"title": "t", "content": "c", "tags": ["a"]}
