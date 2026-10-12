@@ -32,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--age-months", type=int, required=True, help="宝宝月龄，如 18")
     plan.add_argument("--kids", type=int, default=1)
     plan.add_argument("--adults", type=int, default=1)
-    plan.add_argument("--scene", choices=["pickup", "drive"], default="pickup", help="到店自提 / 得来速")
+    plan.add_argument("--scene", choices=["pickup", "drive", "delivery"], default="pickup", help="到店自提 / 得来速 / 麦乐送")
+    plan.add_argument("--address-id", help="外送地址 ID（见 addresses 命令）")
     plan.add_argument("--city")
     plan.add_argument("--keyword", help="位置关键词，如 人民广场")
     plan.add_argument("--store", help="门店编码（跳过门店搜索）")
@@ -51,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     stores.add_argument("--keyword", required=True)
     stores.add_argument("--scene", choices=["pickup", "drive"], default="pickup")
     stores.add_argument("--offline", action="store_true")
+
+    sub.add_parser("addresses", help="列出外送地址（脱敏显示）")
 
     order = sub.add_parser("order", help="按保存的方案算价；加 --confirm 才会下单")
     order.add_argument("--plan", required=True)
@@ -90,6 +93,35 @@ def _resolve_store(client, scene, args, when) -> Store:
     return usable[0]
 
 
+def _mask(text: str, keep: int = 2) -> str:
+    text = str(text or "")
+    return text[:keep] + "***" if len(text) > keep else "***"
+
+
+def _resolve_delivery_store(client, scene, address_id: Optional[str]) -> Store:
+    if not address_id:
+        raise ValueError("麦乐送需要 --address-id，可先运行 addresses 命令查看")
+    stores = parse_stores(client.call_tool("delivery-query-stores", {"beType": scene.be_type, "addressId": address_id}))
+    usable = [s for s in stores if s.open_now and s.be_code]
+    if not usable:
+        raise BabyBiteError("该地址附近暂无可配送的营业门店" + CLOSED_HINT)
+    return usable[0]
+
+
+def cmd_addresses(args, factory, out) -> int:
+    payload = factory(False).call_tool("delivery-query-addresses", {})
+    rows = payload.get("data") or []
+    if isinstance(rows, dict):
+        rows = rows.get("addresses") or rows.get("list") or []
+    if not rows:
+        print("还没有配送地址，请先在麦当劳 App 中添加。", file=out)
+    for row in rows:
+        address_id = row.get("addressId") or row.get("id")
+        full = row.get("fullAddress") or row.get("address") or ""  # 实测字段：addressId/contactName/fullAddress/phone
+        print(f"{address_id}  {_mask(full, keep=6)}", file=out)
+    return EXIT_OK
+
+
 def _attach_price(client, base: dict, result: PlanResult) -> None:
     try:
         payload = client.call_tool("calculate-price", dict(base, items=[to_order_item(result.plans[0].item)]))
@@ -126,9 +158,12 @@ def cmd_plan(args, factory, out) -> int:
     scene = get_scene(args.scene)
     if args.store and scene.needs_be_code and not args.be_code:
         raise ValueError(f"{scene.label}指定门店时需要同时提供 --be-code")
+    if scene.needs_address and not args.address_id:
+        raise ValueError("麦乐送需要 --address-id，可先运行 addresses 命令查看")
     client = factory(args.offline)
     when = args.when or (OFFLINE_WHEN if args.offline else None)
-    store = _resolve_store(client, scene, args, when)
+    store = (_resolve_delivery_store(client, scene, args.address_id) if scene.needs_address
+             else _resolve_store(client, scene, args, when))
     base = store_args(scene, store.code, store.be_code, when)
     menu = parse_menu(client.call_tool("query-meals", base))
     index = NutritionIndex(parse_nutrition_table(client.call_tool("list-nutrition-foods", {}).get("data") or ""))
@@ -142,7 +177,8 @@ def cmd_plan(args, factory, out) -> int:
     plans, excluded = build_plans(candidates, details, index, budget, args.age_months, allergies,
                                   _split(args.keep), args.kids)
     result = PlanResult(args.age_months, args.kids, args.adults, scene, store, when, budget, plans, excluded,
-                        adult_suggestions(menu), offline=args.offline, notices=notices)
+                        adult_suggestions(menu), offline=args.offline, notices=notices,
+                        address_id=args.address_id if scene.needs_address else None)
     if plans:
         _attach_price(client, base, result)
     _emit(result, args, out)
@@ -213,6 +249,12 @@ def cmd_order(args, factory, out) -> int:
         if not take_way:
             raise BabyBiteError("算价结果没有返回取餐方式，已中止下单")
         order_args["takeWayCode"] = take_way
+    if scene.needs_address:
+        if not saved.get("addressId"):
+            raise BabyBiteError("方案缺少 addressId，无法外送下单")
+        order_args["addressId"] = saved["addressId"]
+        if saved.get("remark"):
+            order_args["remark"] = saved["remark"]
     created = client.call_tool("create-order", order_args)
     print("已创建订单，请在支付链接或麦当劳 App 中完成支付：", file=out)
     print(json.dumps(created.get("data"), ensure_ascii=False, indent=2), file=out)
@@ -240,7 +282,8 @@ def cmd_cancel(args, factory, out) -> int:
     return EXIT_OK
 
 
-COMMANDS = {"plan": cmd_plan, "stores": cmd_stores, "order": cmd_order, "verify": cmd_verify, "cancel": cmd_cancel}
+COMMANDS = {"plan": cmd_plan, "stores": cmd_stores, "order": cmd_order, "verify": cmd_verify, "cancel": cmd_cancel,
+            "addresses": cmd_addresses}
 
 
 def main(argv=None, client_factory: Optional[Callable] = None, out=None) -> int:

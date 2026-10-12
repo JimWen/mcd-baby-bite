@@ -165,5 +165,59 @@ class StoresCommandTest(unittest.TestCase):
         self.assertIn("1450713", text)
 
 
+class DeliveryTest(unittest.TestCase):
+    def delivery_client(self):
+        offline = OfflineClient()
+        store = {"storeCode": "1450713", "storeName": "麦当劳上海黄浦华旭国际大厦餐厅", "beCode": "BE1",
+                 "businessStatus": True, "address": "西藏中路336号"}
+
+        class Client(ScriptedClient):
+            def call_tool(self, name, args):
+                self.calls.append((name, args))
+                if name == "delivery-query-stores":
+                    return {"data": [store]}
+                if name == "delivery-query-addresses":
+                    return {"data": {"addresses": [{"addressId": "A1", "fullAddress": "上海市黄浦区人民大道200号3楼",
+                                                    "contactName": "张三", "phone": "13800001234"}]}}
+                if name == "calculate-price":
+                    return {"data": {"price": 2350}}
+                if name == "create-order":
+                    return {"data": {"orderId": "D1"}}
+                return offline.call_tool(name, {k: v for k, v in args.items() if k != "beCode"})
+        return Client({})
+
+    def test_plan_delivery_uses_address_store_and_remark(self):
+        client = self.delivery_client()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.json"
+            code, text = run(["plan", "--age-months", "18", "--scene", "delivery", "--address-id", "A1",
+                              "--when", "2026-10-12 11:30", "--save", str(path)], lambda offline: client)
+            self.assertEqual(code, EXIT_OK)
+            self.assertIn(("delivery-query-stores", {"beType": 2, "addressId": "A1"}), client.calls)
+            meals_args = next(a for n, a in client.calls if n == "query-meals")
+            self.assertEqual((meals_args["orderType"], meals_args["beType"], meals_args["beCode"]), (2, 2, "BE1"))
+            saved = json.loads(path.read_text("utf-8"))
+            self.assertEqual(saved["addressId"], "A1")
+            saved["offline"] = False
+            path.write_text(json.dumps(saved, ensure_ascii=False), "utf-8")
+            code, _ = run(["order", "--plan", str(path), "--confirm"], lambda offline: client)
+            self.assertEqual(code, EXIT_OK)
+            order_args = next(a for n, a in client.calls if n == "create-order")
+            self.assertEqual(order_args["addressId"], "A1")
+            self.assertNotIn("takeWayCode", order_args)
+            self.assertEqual(order_args.get("remark", ""), saved["remark"])
+
+    def test_delivery_requires_address(self):
+        self.assertEqual(run(["plan", "--age-months", "18", "--scene", "delivery"], forbid)[0], EXIT_USAGE)
+
+    def test_addresses_are_masked(self):
+        code, text = run(["addresses"], lambda offline: self.delivery_client())
+        self.assertEqual(code, EXIT_OK)
+        self.assertIn("A1", text)
+        self.assertIn("上海市黄浦区***", text)
+        for secret in ("13800001234", "张三", "人民大道200号"):
+            self.assertNotIn(secret, text)
+
+
 if __name__ == "__main__":
     unittest.main()
