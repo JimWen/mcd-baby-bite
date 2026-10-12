@@ -129,7 +129,7 @@ openclaw skills info mcd-baby-bite                          # 确认已识别
 
 ### WorkBuddy
 
-1. **安装技能**：左侧【专家·技能·连接器】→【技能】→【添加技能】，通过 URL 导入 `https://github.com/JimWen/mcd-baby-bite`（或下载仓库 ZIP 后上传；也可手动放到 `~/.workbuddy/skills/mcd-baby-bite/`）
+1. **安装技能**：左侧【专家·技能·连接器】→【技能】→【添加技能】→【上传技能】，上传 GitHub 页面 Code → Download ZIP 得到的压缩包（已通过 `.gitattributes` 排除演示图片，约 2.5MB，满足 WorkBuddy 单个技能包不超过 5MB 的限制；实测超过会返回 413）；也可手动放到 `~/.workbuddy/skills/mcd-baby-bite/`
 2. **配置麦当劳连接器**（官方赛事指南）：【连接器】→【自定义连接器】→【配置MCP】，填入：
 
 ```json

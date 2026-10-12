@@ -1,0 +1,4 @@
+# 技能包（git archive / GitHub Download ZIP）不需要的演示与开发文件；WorkBuddy 上传限制 5MB
+docs/assets/demo-*.png export-ignore
+docs/assets/cards-preview.png export-ignore
+docs/plan.md export-ignore
