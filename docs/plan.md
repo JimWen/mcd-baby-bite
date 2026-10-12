@@ -3153,11 +3153,13 @@ Expected: 全部 OK，黄金输出测试不受影响
 ```python
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from babybite.age_rules import sodium_budget
+from babybite.errors import BabyBiteError
 from babybite.customize import customize_meal
 from babybite.phone_cards import age_rows, card_candidate_codes, render_age_card, render_staff_card
 from babybite.snapshot import find_browser, html_to_png
@@ -3170,11 +3172,13 @@ for arg in sys.argv[1:]:
     if arg.startswith("--screenshot="):
         open(arg.split("=", 1)[1], "wb").write(b"\\x89PNG fake")
 """
+HANGING_BROWSER = FAKE_BROWSER + "import time\ntime.sleep(30)\n"
+FAILING_BROWSER = "#!/usr/bin/env python3\nimport sys\nsys.exit(3)\n"
 
 
-def make_fake_browser(folder):
-    path = Path(folder) / "fake-chrome"
-    path.write_text(FAKE_BROWSER, "utf-8")
+def make_fake_browser(folder, script=FAKE_BROWSER, name="fake-chrome"):
+    path = Path(folder) / name
+    path.write_text(script, "utf-8")
     path.chmod(0o755)
     return str(path)
 
@@ -3238,6 +3242,22 @@ class SnapshotTest(unittest.TestCase):
             self.assertTrue(html_to_png(html, Path(tmp) / "a.png", browser=make_fake_browser(tmp)))
             self.assertTrue((Path(tmp) / "a.png").read_bytes().startswith(b"\x89PNG"))
 
+    def test_browser_that_never_exits_is_stopped_after_png(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            html = Path(tmp) / "a.html"
+            html.write_text("<p>x</p>", "utf-8")
+            started = time.monotonic()
+            ok = html_to_png(html, Path(tmp) / "a.png", browser=make_fake_browser(tmp, HANGING_BROWSER, "hang"))
+            self.assertTrue(ok)
+            self.assertLess(time.monotonic() - started, 10)
+
+    def test_browser_without_png_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            html = Path(tmp) / "a.html"
+            html.write_text("<p>x</p>", "utf-8")
+            with self.assertRaises(BabyBiteError):
+                html_to_png(html, Path(tmp) / "a.png", browser=make_fake_browser(tmp, FAILING_BROWSER, "fail"))
+
     def test_cli_phone_card(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"BABYBITE_BROWSER": make_fake_browser(tmp)}):
@@ -3267,6 +3287,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -3274,6 +3295,7 @@ from .errors import BabyBiteError
 
 BROWSER_ENV = "BABYBITE_BROWSER"
 CARD_SIZE = (1080, 1440)
+POLL_INTERVAL = 0.2
 MAC_BROWSERS = (
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
@@ -3297,22 +3319,50 @@ def find_browser() -> Optional[str]:
     return None
 
 
+def _wait_for_png(proc, png_path: Path, timeout: float) -> bool:
+    """部分 Chrome 版本（实测 154）截图后进程不退出：图片已写出且大小稳定即视为成功。"""
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    while time.monotonic() < deadline:
+        exited = proc.poll() is not None
+        size = png_path.stat().st_size if png_path.exists() else -1
+        if size > 0 and (exited or size == last_size):
+            return True
+        if exited:
+            return False
+        last_size = size
+        time.sleep(POLL_INTERVAL)
+    return False
+
+
 def html_to_png(html_path, png_path, size=CARD_SIZE, browser: Optional[str] = None, timeout: int = 60) -> bool:
-    """渲染成功返回 True；找不到浏览器返回 False；浏览器执行失败抛 BabyBiteError。"""
+    """渲染成功返回 True；找不到浏览器返回 False；浏览器执行失败或超时抛 BabyBiteError。"""
     browser = browser or find_browser()
     if not browser:
         return False
     html_path, png_path = Path(html_path).resolve(), Path(png_path).resolve()
+    if png_path.exists():
+        png_path.unlink()
     with tempfile.TemporaryDirectory() as profile:
         cmd = [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
                "--no-default-browser-check", f"--user-data-dir={profile}", "--force-device-scale-factor=1",
                f"--window-size={size[0]},{size[1]}", f"--screenshot={png_path}", html_path.as_uri()]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
             raise BabyBiteError(f"浏览器渲染卡片失败：{exc}") from None
-    if proc.returncode != 0 or not png_path.exists():
-        raise BabyBiteError(f"浏览器渲染卡片失败：{(proc.stderr or '').strip()[:200]}")
+        try:
+            ok = _wait_for_png(proc, png_path, timeout)
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+    if not ok:
+        raise BabyBiteError("浏览器渲染卡片失败：未生成图片")
     return True
 ```
 
@@ -3452,7 +3502,7 @@ def render_age_card(rows: list, store_name: str, when: Optional[str]) -> str:
 
 ```python
 from .phone_cards import age_rows, card_candidate_codes, render_age_card, render_staff_card
-from .snapshot import html_to_png
+from .snapshot import find_browser, html_to_png
 ```
 
 新增函数：
@@ -3485,8 +3535,9 @@ def _write_phone_cards(client, base, menu, index, details, result, out_dir, alle
         all_png = all_png and png_ok
         print(f"手机卡片：{html_path}" + (f"、{png_path}" if png_ok else ""), file=sys.stderr)
     if not all_png:
-        print("部分卡片只输出了 HTML：未找到可用的 Chrome / Edge / Chromium，可用环境变量 BABYBITE_BROWSER 指定浏览器路径。",
-              file=sys.stderr)
+        hint = ("未找到可用的 Chrome / Edge / Chromium，可用环境变量 BABYBITE_BROWSER 指定浏览器路径。"
+                if find_browser() is None else "浏览器渲染失败，可直接用浏览器打开 HTML 后截图。")
+        print("部分卡片只输出了 HTML：" + hint, file=sys.stderr)
 ```
 
 在 `cmd_plan` 中，`if plans: _attach_price(...)` 之后、`_emit(...)` 之前加入：

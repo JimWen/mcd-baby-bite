@@ -15,6 +15,8 @@ from .mcp_client import client_from_env
 from .menu import Store, parse_meal_detail, parse_menu, parse_stores
 from .nutrition import NutritionIndex, parse_nutrition_table
 from .planner import PlanResult, adult_suggestions, build_plans, rank_candidates
+from .phone_cards import age_rows, card_candidate_codes, render_age_card, render_staff_card
+from .snapshot import find_browser, html_to_png
 from .scenes import get_scene, store_args
 
 OFFLINE_WHEN = "2026-10-12 11:30"
@@ -44,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--meal-share", type=float, default=1 / 3, help="本餐占全天钠的比例，0.2-0.5")
     plan.add_argument("--json", action="store_true")
     plan.add_argument("--card", help="输出 HTML 卡片路径")
+    plan.add_argument("--phone-card", help="输出手机竖版卡片的目录（HTML；本机有 Chrome/Edge 时同时输出 PNG）")
     plan.add_argument("--save", help="保存方案 JSON，供 order 使用")
     plan.add_argument("--offline", action="store_true", help="用录制的真实数据离线演示，无需 Token")
 
@@ -134,6 +137,38 @@ def _attach_price(client, base: dict, result: PlanResult) -> None:
     result.take_ways = list(data.get("takeWayList") or [])
 
 
+def _write_phone_cards(client, base, menu, index, details, result, out_dir, allergies, keep) -> None:
+    folder = Path(out_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    for code in card_candidate_codes(menu, allergies=allergies):
+        if code in details:
+            continue
+        try:
+            details[code] = parse_meal_detail(client.call_tool("query-meal-detail", dict(base, code=code)))
+        except (McdBusinessError, FixtureMissingError) as exc:
+            result.notices.append(f"速查卡缺少餐品 {code} 的详情：{exc}")
+    cards = []
+    if result.plans:
+        cards.append(("staff-card", render_staff_card(result.plans[0].item, result.age_months, result.store.name)))
+    rows = age_rows(menu, details, index, allergies=allergies, keep=keep)
+    cards.append(("age-card", render_age_card(rows, result.store.name, result.reservation_date)))
+    all_png = True
+    for stem, page in cards:
+        html_path, png_path = folder / f"{stem}.html", folder / f"{stem}.png"
+        html_path.write_text(page, encoding="utf-8")
+        try:
+            png_ok = html_to_png(html_path, png_path)
+        except BabyBiteError as exc:
+            print(f"PNG 渲染失败：{exc}", file=sys.stderr)
+            png_ok = False
+        all_png = all_png and png_ok
+        print(f"手机卡片：{html_path}" + (f"、{png_path}" if png_ok else ""), file=sys.stderr)
+    if not all_png:
+        hint = ("未找到可用的 Chrome / Edge / Chromium，可用环境变量 BABYBITE_BROWSER 指定浏览器路径。"
+                if find_browser() is None else "浏览器渲染失败，可直接用浏览器打开 HTML 后截图。")
+        print("部分卡片只输出了 HTML：" + hint, file=sys.stderr)
+
+
 def _emit(result: PlanResult, args, out) -> None:
     print(render_json(result) if args.json else render_markdown(result), file=out)
     if args.card:
@@ -181,6 +216,8 @@ def cmd_plan(args, factory, out) -> int:
                         address_id=args.address_id if scene.needs_address else None)
     if plans:
         _attach_price(client, base, result)
+    if args.phone_card:
+        _write_phone_cards(client, base, menu, index, details, result, args.phone_card, allergies, _split(args.keep))
     _emit(result, args, out)
     return EXIT_OK
 
