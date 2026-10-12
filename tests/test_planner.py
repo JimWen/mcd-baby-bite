@@ -2,6 +2,7 @@ import unittest
 
 from babybite.age_rules import sodium_budget
 from babybite.customize import CustomizedItem, CustomizedLine, customize_meal
+from babybite.menu import MenuItem
 from babybite.planner import (adult_suggestions, build_plans, floor_portion, plan_for_item,
                               rank_candidates, role_of)
 from tests.helpers import load_detail, load_index, load_menu
@@ -72,6 +73,15 @@ class PlanTest(unittest.TestCase):
         plans, excluded = build_plans(candidates, {}, self.index, sodium_budget(30), 30)
         self.assertEqual(plans, [])
         self.assertEqual(excluded, [("汉堡开心乐园餐", "未取到套餐详情")])
+
+    def test_breakfast_muffin_is_a_candidate(self):
+        menu = [MenuItem("B1", "烟肉蛋麦满分", 12.0, "麦满分"), MenuItem("B2", "麦满分单人餐", 19.9, "人气热卖"),
+                MenuItem("B3", "皮蛋鸡肉粥", 9.0, "粥王系列")]
+        self.assertEqual([m.code for m in rank_candidates(menu, 18)], ["B1"])
+        line = CustomizedLine(None, "烟肉蛋麦满分", "B1", "烟肉蛋麦满分", 1, (), (), None)
+        plan = plan_for_item(CustomizedItem("B1", "烟肉蛋麦满分", 1, (line,), ()), self.index, sodium_budget(18))
+        self.assertEqual(plan.components[0].note, "1/3 份")
+        self.assertAlmostEqual(plan.kid_sodium_mg, 161.0)
 
     def test_adult_suggestions(self):
         self.assertEqual([m.name for m in adult_suggestions(self.menu)],

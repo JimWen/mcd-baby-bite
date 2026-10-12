@@ -112,10 +112,12 @@ def render_markdown(result: PlanResult) -> str:
         out += [f"> {OFFLINE_NOTICE}", ""]
     out += [f"> {notice}" for notice in result.notices] + ([""] if result.notices else [])
     store = result.store
-    distance = f"，距离 {store.distance_m}m" if store.distance_m is not None else ""
+    where = [part for part in (store.address,
+                               f"距离 {store.distance_m}m" if store.distance_m is not None else "",
+                               f"营业 {store.hours}" if store.hours.strip("- ") else "") if part]
     when = f"预约 {result.reservation_date}" if result.reservation_date else "现在"
     out += [
-        f"- 门店：{store.name}（{store.address}{distance}，营业 {store.hours}）",
+        f"- 门店：{store.name}" + (f"（{'，'.join(where)}）" if where else ""),
         f"- 方式：{result.scene.label}；时间：{when}",
         f"- 宝宝：{age_label(result.age_months)} × {result.kids}；大人 × {result.adults}",
         f"- 钠预算：{_budget_text(result)}",

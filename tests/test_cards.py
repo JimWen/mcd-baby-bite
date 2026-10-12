@@ -94,6 +94,13 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", html_text)
         self.assertIn("&lt;script&gt;", html_text)
 
+    def test_store_line_skips_missing_fields(self):
+        result = make_result()
+        result.store = Store("1", "麦当劳某外送店", "", None, True, "00:00-23:59", "BE1", False, ())
+        self.assertIn("- 门店：麦当劳某外送店（营业 00:00-23:59）\n", render_markdown(result))
+        result.store = Store("1", "门店 1", "", None, True, "-", None, False, ())
+        self.assertIn("- 门店：门店 1\n", render_markdown(result))
+
     def test_no_plans(self):
         result = make_result()
         result.plans = []

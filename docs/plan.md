@@ -1644,6 +1644,7 @@ import unittest
 
 from babybite.age_rules import sodium_budget
 from babybite.customize import CustomizedItem, CustomizedLine, customize_meal
+from babybite.menu import MenuItem
 from babybite.planner import (adult_suggestions, build_plans, floor_portion, plan_for_item,
                               rank_candidates, role_of)
 from tests.helpers import load_detail, load_index, load_menu
@@ -1715,6 +1716,15 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(plans, [])
         self.assertEqual(excluded, [("汉堡开心乐园餐", "未取到套餐详情")])
 
+    def test_breakfast_muffin_is_a_candidate(self):
+        menu = [MenuItem("B1", "烟肉蛋麦满分", 12.0, "麦满分"), MenuItem("B2", "麦满分单人餐", 19.9, "人气热卖"),
+                MenuItem("B3", "皮蛋鸡肉粥", 9.0, "粥王系列")]
+        self.assertEqual([m.code for m in rank_candidates(menu, 18)], ["B1"])
+        line = CustomizedLine(None, "烟肉蛋麦满分", "B1", "烟肉蛋麦满分", 1, (), (), None)
+        plan = plan_for_item(CustomizedItem("B1", "烟肉蛋麦满分", 1, (line,), ()), self.index, sodium_budget(18))
+        self.assertEqual(plan.components[0].note, "1/3 份")
+        self.assertAlmostEqual(plan.kid_sodium_mg, 161.0)
+
     def test_adult_suggestions(self):
         self.assertEqual([m.name for m in adult_suggestions(self.menu)],
                          ["人气超值四件套随心选", "鱼牛汉堡四件套随心选", "“我就喜欢”鸡薯双全盒"])
@@ -1750,8 +1760,8 @@ PORTION_LABELS = {1.0: "整份", 0.75: "3/4 份", 0.5: "1/2 份", 1 / 3: "1/3 �
 SIDE_WORDS = ("玉米杯", "苹果片", "纯牛奶", "牛奶", "纯悦", "苹果汁")
 SKIP_WORDS = ("玩具",)
 KID_MEAL_WORD = "开心乐园"
-SINGLE_MAIN_WORDS = ("汉堡包", "吉士汉堡", "鱼排堡", "麦香鱼", "麦乐鸡", "板烧鸡腿堡")
-COMBO_WORDS = ("套餐", "件套", "亲子", "双人", "随心", "精选")
+SINGLE_MAIN_WORDS = ("汉堡包", "吉士汉堡", "鱼排堡", "麦香鱼", "麦乐鸡", "板烧鸡腿堡", "麦满分")  # 麦满分：早餐时段
+COMBO_WORDS = ("套餐", "件套", "亲子", "双人", "随心", "精选", "单人餐")
 MAX_CANDIDATES = 4
 MAX_PLANS = 3
 CUSTOMIZE_BONUS = 0.05  # 每去掉一种配料 / 每条减盐诉求：实际钠低于官方整份数值
@@ -2039,6 +2049,13 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", html_text)
         self.assertIn("&lt;script&gt;", html_text)
 
+    def test_store_line_skips_missing_fields(self):
+        result = make_result()
+        result.store = Store("1", "麦当劳某外送店", "", None, True, "00:00-23:59", "BE1", False, ())
+        self.assertIn("- 门店：麦当劳某外送店（营业 00:00-23:59）\n", render_markdown(result))
+        result.store = Store("1", "门店 1", "", None, True, "-", None, False, ())
+        self.assertIn("- 门店：门店 1\n", render_markdown(result))
+
     def test_no_plans(self):
         result = make_result()
         result.plans = []
@@ -2172,10 +2189,12 @@ def render_markdown(result: PlanResult) -> str:
         out += [f"> {OFFLINE_NOTICE}", ""]
     out += [f"> {notice}" for notice in result.notices] + ([""] if result.notices else [])
     store = result.store
-    distance = f"，距离 {store.distance_m}m" if store.distance_m is not None else ""
+    where = [part for part in (store.address,
+                               f"距离 {store.distance_m}m" if store.distance_m is not None else "",
+                               f"营业 {store.hours}" if store.hours.strip("- ") else "") if part]
     when = f"预约 {result.reservation_date}" if result.reservation_date else "现在"
     out += [
-        f"- 门店：{store.name}（{store.address}{distance}，营业 {store.hours}）",
+        f"- 门店：{store.name}" + (f"（{'，'.join(where)}）" if where else ""),
         f"- 方式：{result.scene.label}；时间：{when}",
         f"- 宝宝：{age_label(result.age_months)} × {result.kids}；大人 × {result.adults}",
         f"- 钠预算：{_budget_text(result)}",
@@ -2994,8 +3013,8 @@ class DeliveryTest(unittest.TestCase):
                 if name == "delivery-query-stores":
                     return {"data": [store]}
                 if name == "delivery-query-addresses":
-                    return {"data": [{"addressId": "A1", "city": "上海市", "address": "人民大道200号",
-                                      "detail": "3楼", "contactName": "张三", "phone": "13800001234"}]}
+                    return {"data": {"addresses": [{"addressId": "A1", "fullAddress": "上海市黄浦区人民大道200号3楼",
+                                                    "contactName": "张三", "phone": "13800001234"}]}}
                 if name == "calculate-price":
                     return {"data": {"price": 2350}}
                 if name == "create-order":
@@ -3031,6 +3050,7 @@ class DeliveryTest(unittest.TestCase):
         code, text = run(["addresses"], lambda offline: self.delivery_client())
         self.assertEqual(code, EXIT_OK)
         self.assertIn("A1", text)
+        self.assertIn("上海市黄浦区***", text)
         for secret in ("13800001234", "张三", "人民大道200号"):
             self.assertNotIn(secret, text)
 ```
@@ -3050,9 +3070,9 @@ Expected: 失败（`--scene delivery` 不在可选值中 / 无 `addresses` 子�
 在 `cli.py` 中新增：
 
 ```python
-def _mask(text: str) -> str:
+def _mask(text: str, keep: int = 2) -> str:
     text = str(text or "")
-    return text[:2] + "***" if len(text) > 2 else "***"
+    return text[:keep] + "***" if len(text) > keep else "***"
 
 
 def _resolve_delivery_store(client, scene, address_id: Optional[str]) -> Store:
@@ -3074,7 +3094,8 @@ def cmd_addresses(args, factory, out) -> int:
         print("还没有配送地址，请先在麦当劳 App 中添加。", file=out)
     for row in rows:
         address_id = row.get("addressId") or row.get("id")
-        print(f"{address_id}  {row.get('city', '')} {_mask(row.get('address'))}", file=out)
+        full = row.get("fullAddress") or row.get("address") or ""  # 实测字段：addressId/contactName/fullAddress/phone
+        print(f"{address_id}  {_mask(full, keep=6)}", file=out)
     return EXIT_OK
 ```
 
@@ -3102,7 +3123,7 @@ def cmd_addresses(args, factory, out) -> int:
 
 `COMMANDS` 增加 `"addresses": cmd_addresses`。
 
-注意：`delivery-query-addresses` 的真实字段名尚未实测，`cmd_addresses` 已兼容 `addressId`/`id` 与列表/字典两种形态；控制者会用真实 Token 校准。
+`delivery-query-addresses` 实测返回 `data` 为字典，地址列表中的字段为 `addressId`、`contactName`、`fullAddress`、`phone`；只展示 `addressId` 与 `fullAddress` 的前 6 个字。
 
 - [ ] **Step 4: 运行确认通过**
 
