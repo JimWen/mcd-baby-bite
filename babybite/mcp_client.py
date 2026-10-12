@@ -88,40 +88,48 @@ def unwrap_tool_result(result: dict) -> dict:
     return payload
 
 
-class McdClient:
-    """在线客户端。读取类工具在 429 / 网络错误时指数退避重试；写操作（下单、取消）从不重试。"""
+class McpHttpClient:
+    """通用 MCP Streamable HTTP 客户端。读取类工具在 429 / 网络错误时指数退避重试；write_tools 中的工具从不重试。"""
 
-    def __init__(self, token: str, endpoint: str = MCD_ENDPOINT, timeout: float = 30.0,
+    auth_hint = ""
+
+    def __init__(self, endpoint: str, token: Optional[str] = None, timeout: float = 30.0,
                  max_retries: int = 3, sleep: Callable[[float], None] = time.sleep,
-                 opener: Callable = urllib.request.urlopen):
-        if not token:
-            raise AuthError(f"缺少 MCP Token，请到 {APPLY_URL} 申请")
+                 opener: Callable = urllib.request.urlopen, secrets: tuple = (),
+                 write_tools: frozenset = WRITE_TOOLS):
         self._token = token
+        self._secrets = tuple(s for s in (token, *secrets) if s)
         self.endpoint = endpoint
         self.timeout = timeout
         self.max_retries = max(1, max_retries)
         self._sleep = sleep
         self._opener = opener
+        self._write_tools = write_tools
         self._session_id: Optional[str] = None
         self._initialized = False
         self._next_id = 1
 
-    def call_tool(self, name: str, arguments: dict) -> dict:
-        """调用工具并返回业务数据（已 unwrap）。"""
-        return unwrap_tool_result(self.call_tool_raw(name, arguments))
+    def _mask(self, text: str) -> str:
+        for secret in self._secrets:
+            text = mask_token(text, secret)
+        return text
 
     def call_tool_raw(self, name: str, arguments: dict) -> dict:
-        """调用工具并返回原始 result 对象（录制 fixtures 用）。"""
+        """调用工具并返回原始 result 对象。"""
         self._ensure_initialized()
         message = self._rpc("tools/call", {"name": name, "arguments": arguments},
-                            retry=name not in WRITE_TOOLS)
+                            retry=name not in self._write_tools)
         if "error" in message:
             err = message.get("error") or {}
-            raise BabyBiteError(f"MCP 错误：{err.get('message', err)}")
+            raise BabyBiteError(self._mask(f"MCP 错误：{err.get('message', err)}"))
         result = message.get("result")
         if not isinstance(result, dict):
             raise BabyBiteError("MCP 响应缺少 result")
         return result
+
+    def call_tool_text(self, name: str, arguments: dict) -> str:
+        """调用工具并返回拼接后的文本内容；工具报错（isError）时抛 BabyBiteError。"""
+        return _result_text(self.call_tool_raw(name, arguments), name, self._mask)
 
     def _ensure_initialized(self) -> None:
         if self._initialized:
@@ -144,9 +152,10 @@ class McdClient:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
-            "Authorization": f"Bearer {self._token}",
             "MCP-Protocol-Version": PROTOCOL_VERSION,
         }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         return headers
@@ -162,30 +171,53 @@ class McdClient:
                     session_id = resp.headers.get("Mcp-Session-Id")
                     if session_id:
                         self._session_id = session_id
-                    return mask_token(resp.read().decode("utf-8"), self._token), resp.headers.get("Content-Type", "")
+                    # 在唯一入口对整个响应体脱敏：之后任何解析错误、业务错误都不会带出凭证
+                    return self._mask(resp.read().decode("utf-8")), resp.headers.get("Content-Type", "")
             except urllib.error.HTTPError as exc:
                 try:
-                    detail = mask_token(exc.read().decode("utf-8", "replace"), self._token)[:200]
+                    detail = self._mask(exc.read().decode("utf-8", "replace"))[:200]  # 先脱敏再截断
                 except (OSError, http.client.HTTPException):
                     detail = "无法读取服务端错误响应"
                 finally:
                     exc.close()
                 if exc.code == 401:
-                    raise AuthError(f"MCP Token 无效或已过期（HTTP 401），请到 {APPLY_URL} 重新申请") from None
+                    raise AuthError(f"MCP 服务鉴权失败（HTTP 401）{self.auth_hint}") from None
                 if exc.code == 429:
                     if attempt < attempts:
                         self._sleep(delay)
                         delay *= 2
                         continue
-                    raise RateLimitError("触发限流（HTTP 429，每个 Token 每分钟最多 600 次），请稍后再试") from None
-                raise TransportError(mask_token(f"HTTP {exc.code}：{detail}", self._token)) from None
+                    raise RateLimitError("触发限流（HTTP 429），请稍后再试") from None
+                raise TransportError(f"HTTP {exc.code}：{detail}") from None
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as exc:
                 if attempt < attempts:
                     self._sleep(delay)
                     delay *= 2
                     continue
-                raise TransportError(mask_token(f"网络错误：{exc}", self._token)) from None
+                raise TransportError(self._mask(f"网络错误：{exc}")) from None
         raise TransportError("请求失败")  # pragma: no cover
+
+
+class McdClient(McpHttpClient):
+    """麦当劳 MCP 客户端：必须带 Token，call_tool 返回已 unwrap 的业务数据。"""
+
+    auth_hint = f"：MCP Token 无效或已过期，请到 {APPLY_URL} 重新申请（每个 Token 每分钟最多 600 次）"
+
+    def __init__(self, token: str, endpoint: str = MCD_ENDPOINT, **kwargs):
+        if not token:
+            raise AuthError(f"缺少 MCP Token，请到 {APPLY_URL} 申请")
+        super().__init__(endpoint, token=token, **kwargs)
+
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        return unwrap_tool_result(self.call_tool_raw(name, arguments))
+
+
+def _result_text(result: dict, name: str, mask=lambda s: s) -> str:
+    text = "\n".join(b.get("text", "") for b in result.get("content") or []
+                     if isinstance(b, dict) and b.get("type") == "text")
+    if result.get("isError"):
+        raise BabyBiteError(mask(f"{name} 调用失败：{text[:200]}"))
+    return text
 
 
 class OfflineClient:
@@ -218,6 +250,9 @@ class OfflineClient:
             raise FixtureMissingError(f"离线数据中没有 {name} 的录制结果")
         self.fell_back = True
         return same_tool[0]["result"]
+
+    def call_tool_text(self, name: str, arguments: dict) -> str:
+        return _result_text(self.call_tool_raw(name, arguments), name)
 
 
 def client_from_env(offline: bool = False, fixture_dir: Optional[Path] = None):

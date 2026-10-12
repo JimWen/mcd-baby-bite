@@ -16,6 +16,7 @@ from .menu import Store, parse_meal_detail, parse_menu, parse_stores
 from .nutrition import NutritionIndex, parse_nutrition_table
 from .planner import PlanResult, adult_suggestions, build_plans, rank_candidates
 from .phone_cards import age_rows, card_candidate_codes, render_age_card, render_staff_card
+from .share import DEFAULT_VISIBILITY, VISIBILITIES, build_note, default_client, publish, render_draft
 from .snapshot import find_browser, html_to_png
 from .scenes import get_scene, store_args
 
@@ -70,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
     cancel = sub.add_parser("cancel", help="取消订单")
     cancel.add_argument("--order-id", required=True)
     cancel.add_argument("--reason", default="1", help="1=改主意了 2=重复下单 3=点错了 -1=其它")
+
+    share = sub.add_parser("share", help="生成小红书笔记草稿；加 --publish --confirm 才会发布")
+    share.add_argument("--plan", required=True)
+    share.add_argument("--images", nargs="*", default=[], help="卡片图片路径（PNG/JPG），可用 plan --phone-card 生成")
+    share.add_argument("--out", help="草稿保存路径（Markdown）")
+    share.add_argument("--publish", action="store_true")
+    share.add_argument("--confirm", action="store_true")
+    share.add_argument("--visibility", choices=VISIBILITIES, default=DEFAULT_VISIBILITY)
     return parser
 
 
@@ -319,13 +328,36 @@ def cmd_cancel(args, factory, out) -> int:
     return EXIT_OK
 
 
+def cmd_share(args, factory, out) -> int:
+    saved = _read_plan_file(args.plan)
+    if not saved.get("plans"):
+        raise BabyBiteError("方案文件里没有可分享的宝宝餐")
+    note = build_note(saved)
+    draft = render_draft(note, args.images)
+    if args.out:
+        Path(args.out).write_text(draft, encoding="utf-8")
+        print(f"草稿已保存：{args.out}", file=sys.stderr)
+    print(draft, file=out)
+    if not args.publish:
+        return EXIT_OK
+    if saved.get("offline"):
+        raise BabyBiteError("离线演示方案不能当作真实经验发布，请用真实 Token 生成方案后再分享")
+    if not args.confirm:
+        print(f"将以「{args.visibility}」发布到小红书。确认无误后加 --confirm 再执行。", file=out)
+        return EXIT_OK
+    print(publish(note, args.images, args.visibility, client=args.xhs_factory()), file=out)
+    return EXIT_OK
+
+
 COMMANDS = {"plan": cmd_plan, "stores": cmd_stores, "order": cmd_order, "verify": cmd_verify, "cancel": cmd_cancel,
-            "addresses": cmd_addresses}
+            "addresses": cmd_addresses, "share": cmd_share}
 
 
-def main(argv=None, client_factory: Optional[Callable] = None, out=None) -> int:
+def main(argv=None, client_factory: Optional[Callable] = None, out=None,
+         xhs_factory: Optional[Callable] = None) -> int:
     out = out or sys.stdout
     args = build_parser().parse_args(argv)
+    args.xhs_factory = xhs_factory or default_client
     factory = client_factory or (lambda offline: client_from_env(offline=offline))
     try:
         return COMMANDS[args.command](args, factory, out)

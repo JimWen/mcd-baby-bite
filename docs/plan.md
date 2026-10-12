@@ -3392,11 +3392,12 @@ h1{font-size:64px;margin:28px 0 12px;line-height:1.25}
 .foot{margin-top:auto;font-size:24px;color:#7a6f5a;line-height:1.5}
 """
 _STAFF_CSS = """
-.box{background:#fff;border-radius:32px;padding:36px 40px;margin-top:28px;box-shadow:0 4px 16px rgba(0,0,0,.06)}
+h1{font-size:76px}
+.box{background:#fff;border-radius:36px;padding:48px 52px;margin-top:40px;box-shadow:0 4px 16px rgba(0,0,0,.06)}
 .ask{background:#ffbc0d}
-.label{font-size:30px;color:#7a6f5a;margin-bottom:12px}.ask .label{color:#5a4300}
-.big{font-size:52px;font-weight:800;line-height:1.4;margin:0;padding:0;list-style:none}
-.soft{font-size:34px;margin-top:16px;font-weight:600}
+.label{font-size:34px;color:#7a6f5a;margin-bottom:16px}.ask .label{color:#5a4300}
+.big{font-size:64px;font-weight:800;line-height:1.4;margin:0;padding:0;list-style:none}
+.soft{font-size:40px;margin-top:20px;font-weight:600}
 """
 _AGE_CSS = """
 .row{display:flex;background:#fff;border-radius:28px;margin-top:22px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.06)}
@@ -3405,7 +3406,7 @@ _AGE_CSS = """
 .info{padding:24px 30px;flex:1}.dish{font-size:38px;font-weight:800;margin-bottom:8px}
 .line{font-size:27px;line-height:1.5;color:#4a4a4a}
 """
-AGE_CARD_FOOT = ("盐上限依据：中国营养学会《家庭减盐行为指南》T/CNSS 022-2023、《中国居民膳食指南（2022）》。"
+AGE_CARD_FOOT = ("菜单为门店实时数据；盐上限依据：中国营养学会《家庭减盐行为指南》T/CNSS 022-2023、《中国居民膳食指南（2022）》。"
                  "营养数据来自麦当劳 MCP 官方接口，去料后实际更低。偶尔吃，吃得明白；不构成营养建议。")
 
 
@@ -3483,7 +3484,7 @@ def render_age_card(rows: list, store_name: str, when: Optional[str]) -> str:
     body = (
         '<span class="tag">宝宝点餐速查卡</span>'
         "<h1>带娃吃麦当劳<br>按年龄这样点</h1>"
-        f'<p class="sub">{e(store_name)}{e(when_text)} · 门店实时菜单</p>'
+        f'<p class="sub">{e(store_name)}{e(when_text)}</p>'
         + "".join(blocks)
         + f'<div class="foot">{e(AGE_CARD_FOOT)}</div>'
     )
@@ -3699,7 +3700,7 @@ if __name__ == "__main__":
 Run: `python3 -m unittest tests.test_share -v`
 Expected: `ImportError: cannot import name 'McpHttpClient'`
 
-- [ ] **Step 3: 重构** `babybite/mcp_client.py`：把整个 `class McdClient` 替换为下面两个类（`OfflineClient`、`client_from_env` 等保持不变），并在 `OfflineClient` 中追加 `call_tool_text`
+- [ ] **Step 3: 重构** `babybite/mcp_client.py`：把整个 `class McdClient` 替换为下面两个类（`OfflineClient`、`client_from_env`、`import http.client` 等保持不变），并在 `OfflineClient` 中追加 `call_tool_text`；已有的 `MaskingTest` 必须继续通过
 
 ```python
 class McpHttpClient:
@@ -3788,8 +3789,12 @@ class McpHttpClient:
                     # 在唯一入口对整个响应体脱敏：之后任何解析错误、业务错误都不会带出凭证
                     return self._mask(resp.read().decode("utf-8")), resp.headers.get("Content-Type", "")
             except urllib.error.HTTPError as exc:
-                detail = self._mask(exc.read().decode("utf-8", "replace"))[:200]  # 先脱敏再截断
-                exc.close()
+                try:
+                    detail = self._mask(exc.read().decode("utf-8", "replace"))[:200]  # 先脱敏再截断
+                except (OSError, http.client.HTTPException):
+                    detail = "无法读取服务端错误响应"
+                finally:
+                    exc.close()
                 if exc.code == 401:
                     raise AuthError(f"MCP 服务鉴权失败（HTTP 401）{self.auth_hint}") from None
                 if exc.code == 429:
