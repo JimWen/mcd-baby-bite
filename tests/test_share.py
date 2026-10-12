@@ -36,6 +36,14 @@ def run_share(argv, xhs=None):
 
 
 class NoteTest(unittest.TestCase):
+    def test_note_includes_under_four_food_preparation_tip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, data = saved_plan(tmp)
+        content = build_note(data)["content"]
+        self.assertIn("3. 4 岁以下：整粒玉米压碎、生苹果切细丝或刮泥、汉堡和鸡块撕成小块，"
+                      "全程看护进食（参考美国 CDC 幼儿防噎指南）。", content)
+        self.assertNotIn("3 岁以下", content)
+
     def test_note_limits_and_tone(self):
         with tempfile.TemporaryDirectory() as tmp:
             _, data = saved_plan(tmp)

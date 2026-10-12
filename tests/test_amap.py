@@ -24,6 +24,17 @@ class AmapTest(unittest.TestCase):
         text = weather_notice(self.client, "上海市", "2026-10-12")
         self.assertEqual(text, "高德天气：2026-10-12 白天阴，26℃。")
 
+    def test_weather_missing_requested_date_returns_none(self):
+        for date in ("2026-10-11", "2026-10-20"):
+            with self.subTest(date=date):
+                self.assertIsNone(weather_notice(self.client, "上海市", date))
+
+    def test_weather_matches_later_forecast(self):
+        client = TextClient('{"forecasts":[{"date":"2026-10-12","dayweather":"小雨","daytemp":"18"},'
+                            '{"date":"2026-10-13","dayweather":"晴","daytemp":"22"}]}')
+        self.assertEqual(weather_notice(client, "上海市", "2026-10-13"),
+                         "高德天气：2026-10-13 白天晴，22℃。")
+
     def test_bad_weather_suggests_drive_or_delivery(self):
         client = TextClient('{"forecasts":[{"date":"2026-10-20","dayweather":"小雨","daytemp":"18"}]}')
         self.assertIn("得来速或麦乐送", weather_notice(client, "上海市", "2026-10-20"))
@@ -60,6 +71,15 @@ class AmapCliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("高德天气：2026-10-12 白天阴，26℃。", text)
         self.assertIn("高德步行：从「人民广场」到 麦当劳(华旭国际大厦店) 约 13 分钟（938 米）。", text)
+        self.assertIn("高德导航：amapuri://navi?", text)
+
+    def test_offline_plan_omits_weather_outside_forecast(self):
+        code, text = run(["plan", "--age-months", "18", "--offline", "--from", "人民广场",
+                          "--when", "2026-10-20 11:30"])
+        self.assertEqual(code, 0)
+        self.assertIn("预约 2026-10-20 11:30", text)
+        self.assertNotIn("高德天气：", text)
+        self.assertIn("高德步行：", text)
         self.assertIn("高德导航：amapuri://navi?", text)
 
     def test_missing_key_degrades(self):

@@ -88,7 +88,7 @@ def _json(client, name: str, args: dict) -> dict:
 
 def weather_notice(client, city: str, date: Optional[str]) -> Optional[str]:
     forecasts = _json(client, "maps_weather", {"city": city}).get("forecasts") or []
-    day = next((f for f in forecasts if date and f.get("date") == date), forecasts[0] if forecasts else None)
+    day = next((f for f in forecasts if date and f.get("date") == date), None)
     if not day:
         return None
     weather = day.get("dayweather", "")

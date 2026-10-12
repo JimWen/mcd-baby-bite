@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .cards import age_label
+from .cards import CHOKING_TIP, age_label
 from .mcp_client import McpHttpClient
 
 XHS_MCP_URL = "http://127.0.0.1:18060/mcp"
@@ -37,7 +37,7 @@ def build_note(saved: dict) -> dict:
     ]
     if top.get("saltRequests"):
         lines += ["线上去不掉的盐，我会跟店员说一句：", f"“{top['staffScript']}”", ""]
-    lines += ["小提示：", "1. 偶尔吃，回家搭配蔬果和白水", "2. 拿到先尝一口温度和咸淡", "3. 3 岁以下撕成小块，全程看护", "",
+    lines += ["小提示：", "1. 偶尔吃，回家搭配蔬果和白水", "2. 拿到先尝一口温度和咸淡", f"3. {CHOKING_TIP}", "",
               "个人经验分享，不构成营养建议，餐品与价格以门店为准。"]
     return {
         "title": f"{age}宝宝吃麦当劳这样点"[:TITLE_MAX],
