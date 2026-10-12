@@ -20,6 +20,7 @@ SINGLE_MAIN_WORDS = ("汉堡包", "吉士汉堡", "鱼排堡", "麦香鱼", "麦
 COMBO_WORDS = ("套餐", "件套", "亲子", "双人", "随心", "精选")
 MAX_CANDIDATES = 4
 MAX_PLANS = 3
+CUSTOMIZE_BONUS = 0.05  # 每去掉一种配料 / 每条减盐诉求：实际钠低于官方整份数值
 ADULT_CATEGORY_WORDS = ("精选单人餐", "人气热卖")
 FRIES_NOTE = "建议大人吃，宝宝最多尝 2-3 根"
 UNKNOWN_NOTE = "无官方营养数据，未计入钠合计，建议先给 1/2 份"
@@ -114,6 +115,7 @@ def plan_for_item(item: CustomizedItem, index: NutritionIndex, budget: SodiumBud
     kid_sodium = sum(c.kid_sodium_mg for c in components if c.kid_sodium_mg is not None)
     allergens = {a for line, role, _ in rows if role != "skip" for a in possible_allergens(line.name)}
     score = (1 - kid_sodium / budget.meal_sodium_mg) + (2.0 if KID_MEAL_WORD in item.name else 0.0) \
+        + CUSTOMIZE_BONUS * (len(item.removed_all) + len(item.salt_requests)) \
         - len(unknown) - 0.1 * len(allergens)
     return KidPlan(item, menu_price_yuan, tuple(components), kid_sodium, budget, unknown, score)
 

@@ -1691,7 +1691,7 @@ class PlanTest(unittest.TestCase):
         candidates = rank_candidates(self.menu, 18)
         self.assertEqual([m.code for m in candidates], ["9900016057", "9900016058", "9900016056", "1406"])
         plans, excluded = build_plans(candidates, details_for(candidates), self.index, sodium_budget(18), 18)
-        self.assertEqual([p.item.name for p in plans], ["麦乐鸡开心乐园餐", "汉堡开心乐园餐", "鱼排堡开心乐园餐"])
+        self.assertEqual([p.item.name for p in plans], ["汉堡开心乐园餐", "鱼排堡开心乐园餐", "麦乐鸡开心乐园餐"])
         self.assertEqual(excluded, [("板烧鸡腿堡", "即使只吃 1/4 份也会超出本餐钠预算")])
 
     def test_fish_allergy_removes_fish_candidates(self):
@@ -1754,6 +1754,7 @@ SINGLE_MAIN_WORDS = ("汉堡包", "吉士汉堡", "鱼排堡", "麦香鱼", "麦
 COMBO_WORDS = ("套餐", "件套", "亲子", "双人", "随心", "精选")
 MAX_CANDIDATES = 4
 MAX_PLANS = 3
+CUSTOMIZE_BONUS = 0.05  # 每去掉一种配料 / 每条减盐诉求：实际钠低于官方整份数值
 ADULT_CATEGORY_WORDS = ("精选单人餐", "人气热卖")
 FRIES_NOTE = "建议大人吃，宝宝最多尝 2-3 根"
 UNKNOWN_NOTE = "无官方营养数据，未计入钠合计，建议先给 1/2 份"
@@ -1848,6 +1849,7 @@ def plan_for_item(item: CustomizedItem, index: NutritionIndex, budget: SodiumBud
     kid_sodium = sum(c.kid_sodium_mg for c in components if c.kid_sodium_mg is not None)
     allergens = {a for line, role, _ in rows if role != "skip" for a in possible_allergens(line.name)}
     score = (1 - kid_sodium / budget.meal_sodium_mg) + (2.0 if KID_MEAL_WORD in item.name else 0.0) \
+        + CUSTOMIZE_BONUS * (len(item.removed_all) + len(item.salt_requests)) \
         - len(unknown) - 0.1 * len(allergens)
     return KidPlan(item, menu_price_yuan, tuple(components), kid_sodium, budget, unknown, score)
 
@@ -1964,7 +1966,7 @@ def make_result(age=18, allergies=(), scene="pickup"):
     budget = sodium_budget(age)
     plans, excluded = build_plans(candidates, details, load_index(), budget, age, allergies)
     return PlanResult(age, 1, 2, get_scene(scene), STORE, LUNCH, budget, plans, excluded,
-                      adult_suggestions(menu), price_cents=2500, offline=True)
+                      adult_suggestions(menu), price_cents=2350, offline=True)
 
 
 class TextTest(unittest.TestCase):
@@ -1983,7 +1985,8 @@ class TextTest(unittest.TestCase):
     def test_staff_script_without_salt_request(self):
         text = staff_script(customize_meal(load_detail("9900016056"), 18), 18)
         self.assertNotIn("做不到", text)
-        self.assertIn("线上没有可去的配料", text)
+        self.assertNotIn("线上已经去掉", text)
+        self.assertIn("按正常出餐即可", text)
 
     def test_delivery_remark(self):
         item = customize_meal(load_detail("9900016057"), 18)
@@ -2002,9 +2005,12 @@ class RenderTest(unittest.TestCase):
 
     def test_markdown_sections_and_numbers(self):
         text = render_markdown(self.result)
-        for part in ("# 小小麦门 · 带娃吃麦定制单", "## 主推：麦乐鸡开心乐园餐 × 1", "### 店员话术卡",
+        for part in ("# 小小麦门 · 带娃吃麦定制单", "## 主推：汉堡开心乐园餐 × 1", "### 店员话术卡",
                      "## 备选", "## 未推荐", "## 大人餐参考", "## 温馨提示", "## 说明",
-                     "本餐 197mg", "实时核价 ¥25.00", "离线演示"):
+                     "本餐 197mg", "实时核价 ¥23.50", "离线演示",
+                     "| 汉堡包 | 线上已去：酸黄瓜、洋葱粒、番茄酱、芥末酱 | 492mg | 1/4 份 | ≤123mg |",
+                     "| 纯牛奶 | - | 73mg | 整份 | 73mg |", "本餐宝宝钠合计 ≤197mg",
+                     "麦乐鸡开心乐园餐：麦乐鸡-4块 1/3 份（约 1 块）；宝宝钠 约 186mg"):
             with self.subTest(part=part):
                 self.assertIn(part, text)
 
@@ -2019,8 +2025,8 @@ class RenderTest(unittest.TestCase):
 
     def test_json_contains_order_item(self):
         data = json.loads(render_json(self.result))
-        self.assertEqual(data["plans"][0]["productCode"], "9900016056")
-        self.assertEqual(data["plans"][0]["orderItem"]["productCode"], "9900016056")
+        self.assertEqual(data["plans"][0]["productCode"], "9900016057")
+        self.assertEqual(data["plans"][0]["orderItem"]["productCode"], "9900016057")
         self.assertEqual(data["store"]["code"], "1450713")
         self.assertTrue(data["offline"])
 
@@ -2087,8 +2093,11 @@ def age_label(age_months: int) -> str:
 
 
 def staff_script(item: CustomizedItem, age_months: int) -> str:
-    removed = "、".join(item.removed_all) if item.removed_all else "（该餐品线上没有可去的配料）"
-    text = f"您好，这份{item.name}是给 {age_label(age_months)}宝宝吃的。线上已经去掉：{removed}。"
+    text = f"您好，这份{item.name}是给 {age_label(age_months)}宝宝吃的。"
+    if not item.removed_all and not item.salt_requests:
+        return text + "按正常出餐即可，谢谢您！"
+    if item.removed_all:
+        text += f"线上已经去掉：{'、'.join(item.removed_all)}。"
     if item.salt_requests:
         text += f"如果方便的话，麻烦{'、'.join(item.salt_requests)}。做不到也没关系，"
     return text + "谢谢您！"
@@ -2114,17 +2123,22 @@ def _handling(line) -> str:
     return "；".join(parts) or "-"
 
 
-def _kid_mg(comp) -> str:
+def _kid_mg(line, comp) -> str:
     if comp.kid_sodium_mg is None or comp.portion == 0:
         return "-"
-    return f"≤{comp.kid_sodium_mg:.0f}mg"
+    return f"{'≤' if line.removed else ''}{comp.kid_sodium_mg:.0f}mg"
+
+
+def _total_prefix(plan: KidPlan) -> str:
+    """有去料或减盐诉求时实际钠低于官方数值，写"≤"；否则按官方数值写"约"。"""
+    return "≤" if plan.item.removed_all or plan.item.salt_requests else "约 "
 
 
 def _rows(plan: KidPlan):
     """(子项名, 处理, 官方钠, 份量, 宝宝摄入钠)，跳过玩具等不计入项。"""
     for line, comp in zip(plan.item.lines, plan.components):
         if comp.role != "skip":
-            yield line.name, _handling(line), _mg(comp.sodium_mg), comp.note, _kid_mg(comp)
+            yield line.name, _handling(line), _mg(comp.sodium_mg), comp.note, _kid_mg(line, comp)
 
 
 def _price_text(plan: KidPlan, price_cents: Optional[int]) -> str:
@@ -2137,7 +2151,7 @@ def _price_text(plan: KidPlan, price_cents: Optional[int]) -> str:
 
 
 def _summary(plan: KidPlan) -> str:
-    return (f"本餐宝宝钠合计 ≤{plan.kid_sodium_mg:.0f}mg，约占本餐预算 {plan.meal_pct}%、"
+    return (f"本餐宝宝钠合计 {_total_prefix(plan)}{plan.kid_sodium_mg:.0f}mg，约占本餐预算 {plan.meal_pct}%、"
             f"全天上限 {plan.day_pct}%。")
 
 
@@ -2149,7 +2163,7 @@ def _budget_text(result: PlanResult) -> str:
 
 def _alt_text(plan: KidPlan) -> str:
     mains = "、".join(f"{c.name} {c.note}" for c in plan.components if c.role == "main")
-    return f"{plan.item.name}：{mains}；宝宝钠 ≤{plan.kid_sodium_mg:.0f}mg（本餐预算 {plan.meal_pct}%）"
+    return f"{plan.item.name}：{mains}；宝宝钠 {_total_prefix(plan)}{plan.kid_sodium_mg:.0f}mg（本餐预算 {plan.meal_pct}%）"
 
 
 def render_markdown(result: PlanResult) -> str:
@@ -2379,8 +2393,8 @@ class PlanCommandTest(unittest.TestCase):
             code, text = run(["plan", "--age-months", "18", "--offline", "--json", "--save", str(saved), "--card", str(card)])
             self.assertEqual(code, EXIT_OK)
             data = json.loads(text)
-            self.assertEqual(data["priceCents"], 2500)
-            self.assertEqual(json.loads(saved.read_text("utf-8"))["plans"][0]["productCode"], "9900016056")
+            self.assertEqual(data["priceCents"], 2350)
+            self.assertEqual(json.loads(saved.read_text("utf-8"))["plans"][0]["productCode"], "9900016057")
             self.assertTrue(card.read_text("utf-8").startswith("<!doctype html>"))
 
     def test_all_stores_closed_without_when(self):
@@ -2433,7 +2447,7 @@ class OrderCommandTest(unittest.TestCase):
             name, args = client.calls[1]
             self.assertEqual(name, "create-order")
             self.assertEqual(args["takeWayCode"], "locker-out")
-            self.assertEqual(args["items"][0]["productCode"], "9900016056")
+            self.assertEqual(args["items"][0]["productCode"], "9900016057")
             self.assertIn("T1", text)
 
     def test_offline_plan_cannot_be_ordered(self):
@@ -2738,10 +2752,11 @@ def main(argv=None, client_factory: Optional[Callable] = None, out=None) -> int:
 Run: `mkdir -p tests/golden && python3 -m babybite plan --age-months 18 --offline --adults 2 > tests/golden/plan_18m_offline.md`
 
 人工核对（把以下检查结果写进任务报告）：
-- 主推为"麦乐鸡开心乐园餐 × 1"，含"菜单价 ¥25 / 实时核价 ¥25.00"
-- 表格中 麦乐鸡-4块 为"1/3 份（约 1 块）"，纯牛奶、小杯玉米杯、苹果片一袋(60g) 为"整份"
+- 主推为"汉堡开心乐园餐 × 1"，含"菜单价 ¥23.5 / 实时核价 ¥23.50"
+- 表格中 汉堡包 为"线上已去：酸黄瓜、洋葱粒、番茄酱、芥末酱"、"1/4 份"、"≤123mg"；迷你薯条为"建议大人吃，宝宝最多尝 2-3 根"；纯牛奶、小杯玉米杯为"整份"
+- 店员话术卡含"牛肉饼不撒盐、薯条不加盐"
 - "本餐 197mg（全天上限 590mg = 食盐 1.5g × 393"
-- 备选含汉堡开心乐园餐（汉堡包 1/4 份）与鱼排堡开心乐园餐；未推荐含"板烧鸡腿堡：即使只吃 1/4 份也会超出本餐钠预算"
+- 备选含麦乐鸡开心乐园餐（麦乐鸡-4块 1/3 份，约 1 块）与鱼排堡开心乐园餐；未推荐含"板烧鸡腿堡：即使只吃 1/4 份也会超出本餐钠预算"
 
 - [ ] **Step 5: 运行确认通过**
 
@@ -3125,7 +3140,7 @@ class AgeCardTest(unittest.TestCase):
     def test_rows_follow_bands_and_budgets(self):
         self.assertEqual([r.band_label for r in self.rows], ["1-2 岁", "2-3 岁", "4-6 岁"])
         self.assertEqual([r.meal_sodium_mg for r in self.rows], [197, 262, 393])
-        self.assertEqual(self.rows[0].plan.item.name, "麦乐鸡开心乐园餐")
+        self.assertEqual(self.rows[0].plan.item.name, "汉堡开心乐园餐")
         for row in self.rows:
             self.assertIsNotNone(row.plan)
             self.assertLessEqual(row.plan.kid_sodium_mg, row.meal_sodium_mg)
@@ -3414,7 +3429,7 @@ def _write_phone_cards(client, base, menu, index, details, result, out_dir, alle
 - [ ] **Step 6: 运行确认通过**
 
 Run: `python3 -m unittest discover -s tests -v`
-Expected: 全部 OK。若 `test_rows_follow_bands_and_budgets` 中 18 月龄行不是麦乐鸡开心乐园餐，说明与 Task 7 的排序不一致，报告给控制者，不要改期望值。
+Expected: 全部 OK。若 `test_rows_follow_bands_and_budgets` 中 18 月龄行不是汉堡开心乐园餐，说明与 Task 7 的排序不一致，报告给控制者，不要改期望值。
 
 ---
 
@@ -3483,7 +3498,8 @@ class NoteTest(unittest.TestCase):
         self.assertEqual(note["title"], "1岁6个月宝宝吃麦当劳这样点")
         self.assertLessEqual(len(note["title"]), TITLE_MAX)
         self.assertLessEqual(len(note["content"]), CONTENT_MAX)
-        self.assertIn("麦乐鸡开心乐园餐", note["content"])
+        self.assertIn("汉堡开心乐园餐", note["content"])
+        self.assertIn("牛肉饼不撒盐", note["content"])
         self.assertIn("偶尔吃", note["content"])
         self.assertNotIn("github", note["content"].lower())
         for phrase in BANNED_PHRASES:

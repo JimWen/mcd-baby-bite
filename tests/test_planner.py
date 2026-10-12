@@ -49,7 +49,7 @@ class PlanTest(unittest.TestCase):
         candidates = rank_candidates(self.menu, 18)
         self.assertEqual([m.code for m in candidates], ["9900016057", "9900016058", "9900016056", "1406"])
         plans, excluded = build_plans(candidates, details_for(candidates), self.index, sodium_budget(18), 18)
-        self.assertEqual([p.item.name for p in plans], ["麦乐鸡开心乐园餐", "汉堡开心乐园餐", "鱼排堡开心乐园餐"])
+        self.assertEqual([p.item.name for p in plans], ["汉堡开心乐园餐", "鱼排堡开心乐园餐", "麦乐鸡开心乐园餐"])
         self.assertEqual(excluded, [("板烧鸡腿堡", "即使只吃 1/4 份也会超出本餐钠预算")])
 
     def test_fish_allergy_removes_fish_candidates(self):
