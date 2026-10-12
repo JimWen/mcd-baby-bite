@@ -3192,6 +3192,8 @@ class StaffCardTest(unittest.TestCase):
         page = render_staff_card(item, 18, "<b>店</b>")
         self.assertNotIn("<b>店</b>", page)
         self.assertIn("按正常出餐即可", page)
+        self.assertNotIn("线上已经去掉", page)
+        self.assertNotIn("做不到也没关系", page)
 
 
 class AgeCardTest(unittest.TestCase):
@@ -3394,16 +3396,20 @@ def _page(title: str, css: str, body: str) -> str:
 
 def render_staff_card(item, age_months: int, store_name: str) -> str:
     e = html.escape
-    removed = "、".join(item.removed_all) or "无"
-    asks = "".join(f"<li>{e(s)}</li>" for s in item.salt_requests) or "<li>按正常出餐即可，谢谢</li>"
+    removed_box = (f'<div class="box"><div class="label">线上已经去掉</div>'
+                   f'<div class="big">{e("、".join(item.removed_all))}</div></div>') if item.removed_all else ""
+    if item.salt_requests:
+        asks = "".join(f"<li>{e(s)}</li>" for s in item.salt_requests)
+        ask_box = (f'<div class="box ask"><div class="label">如果方便，麻烦您</div><ul class="big">{asks}</ul>'
+                   '<div class="soft">做不到也没关系，谢谢您！</div></div>')
+    else:
+        ask_box = '<div class="box ask"><div class="big">按正常出餐即可，谢谢您！</div></div>'
     body = (
         '<span class="tag">给店员看 · 宝宝餐</span>'
         f"<h1>您好，这份是给<br>{e(age_label(age_months))}宝宝吃的</h1>"
         f'<p class="sub">{e(item.name)} × {item.quantity}</p>'
-        f'<div class="box"><div class="label">线上已经去掉</div><div class="big">{e(removed)}</div></div>'
-        f'<div class="box ask"><div class="label">如果方便，麻烦您</div><ul class="big">{asks}</ul>'
-        '<div class="soft">做不到也没关系，谢谢您！</div></div>'
-        f'<div class="foot">{e(store_name)} · 由 mcd-baby-bite 生成，非麦当劳官方</div>'
+        + removed_box + ask_box
+        + f'<div class="foot">{e(store_name)} · 由 mcd-baby-bite 生成，非麦当劳官方</div>'
     )
     return _page("店员话术卡", _STAFF_CSS, body)
 
