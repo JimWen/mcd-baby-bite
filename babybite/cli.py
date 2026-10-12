@@ -8,13 +8,14 @@ import sys
 from pathlib import Path
 from typing import Callable, Optional
 
+from .activities import kid_campaigns
 from .age_rules import INFANT_ADVICE, band_for, parse_allergies, sodium_budget
-from .amap import (AMAP_MAX_STORES, WALK_MAX_MIN, amap_client_from_env, geocode, navi_url,
-                   route_for_store, weather_notice)
+from .amap import (AMAP_MAX_STORES, WALK_MAX_MIN, Throttled, amap_client_from_env, geocode, navi_url,
+                   nearby_play, route_for_store, store_location, weather_notice)
 from .cards import render_html, render_json, render_markdown
 from .customize import to_order_item
 from .errors import AuthError, BabyBiteError, FixtureMissingError, McdBusinessError
-from .mcp_client import client_from_env
+from .mcp_client import McpHttpClient, client_from_env
 from .menu import Store, parse_meal_detail, parse_menu, parse_stores
 from .nutrition import NutritionIndex, parse_nutrition_table
 from .planner import PlanResult, adult_suggestions, build_plans, rank_candidates
@@ -44,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--keyword", help="位置关键词，如 人民广场")
     plan.add_argument("--from", dest="origin",
                       help="出发地点，用高德计算步行到店时间并给出天气提醒（需 AMAP_MAPS_API_KEY）")
+    plan.add_argument("--play", action="store_true", help="推荐门店周边 2 公里的饭后遛娃地点（需 AMAP_MAPS_API_KEY）")
     plan.add_argument("--store", help="门店编码（跳过门店搜索）")
     plan.add_argument("--be-code", help="得来速门店的 beCode")
     plan.add_argument("--when", help="预约时间 yyyy-MM-dd HH:mm")
@@ -110,13 +112,23 @@ def _usable_stores(client, scene, args, when) -> list:
     return usable
 
 
+def _amap_client(args):
+    """一次 plan 共用一个高德客户端，让 --from 与 --play 共享节流状态。"""
+    if not hasattr(args, "_amap_client"):
+        client = args.amap_factory(args.offline)
+        if not args.offline and isinstance(client, McpHttpClient):
+            client = Throttled(client)
+        args._amap_client = client
+    return args._amap_client
+
+
 def _pick_store_with_amap(stores, args, when, notices):
-    client = args.amap_factory(args.offline)
-    if client is None:
-        notices.append("未配置 AMAP_MAPS_API_KEY，已跳过高德步行与天气提醒。")
-        return stores[0]
     city = args.city or OFFLINE_CITY
     try:
+        client = _amap_client(args)
+        if client is None:
+            notices.append("未配置 AMAP_MAPS_API_KEY，已跳过高德步行与天气提醒。")
+            return stores[0]
         weather = weather_notice(client, city, (when or dt.date.today().isoformat())[:10])
         if weather:
             notices.append(weather)
@@ -139,6 +151,24 @@ def _pick_store_with_amap(stores, args, when, notices):
     except BabyBiteError as exc:
         notices.append(f"高德服务暂不可用（{exc}），已按麦当劳门店距离选择。")
         return stores[0]
+
+
+def _attach_play(args, result: PlanResult) -> None:
+    if args.offline:
+        result.notices.append("离线演示不包含饭后遛娃推荐（需要高德 Key 的在线模式）")
+        return
+    try:
+        client = _amap_client(args)
+        if client is None:
+            result.notices.append("未配置 AMAP_MAPS_API_KEY，已跳过饭后遛娃推荐。")
+            return
+        found = store_location(client, result.store.name, args.city or OFFLINE_CITY)
+        if not found:
+            result.notices.append("高德未找到门店坐标，已跳过饭后遛娃推荐。")
+            return
+        result.play_spots = nearby_play(client, found[1])
+    except BabyBiteError as exc:
+        result.notices.append(f"高德服务暂不可用（{exc}），已跳过饭后遛娃推荐。")
 
 
 def _mask(text: str, keep: int = 2) -> str:
@@ -263,6 +293,12 @@ def cmd_plan(args, factory, out) -> int:
     result = PlanResult(args.age_months, args.kids, args.adults, scene, store, when, budget, plans, excluded,
                         adult_suggestions(menu), offline=args.offline, notices=notices,
                         address_id=args.address_id if scene.needs_address else None)
+    try:
+        result.campaigns = kid_campaigns(client.call_tool("campaign-calendar", {}))
+    except BabyBiteError:
+        pass
+    if args.play:
+        _attach_play(args, result)
     if plans:
         _attach_price(client, base, result)
     if args.phone_card:

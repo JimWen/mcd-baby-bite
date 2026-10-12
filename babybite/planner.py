@@ -183,3 +183,5 @@ class PlanResult:
     offline: bool = False
     notices: list = field(default_factory=list)
     address_id: Optional[str] = None
+    campaigns: list = field(default_factory=list)
+    play_spots: list = field(default_factory=list)

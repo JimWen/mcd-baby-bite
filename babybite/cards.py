@@ -5,6 +5,7 @@ import html
 import json
 from typing import Optional
 
+from .activities import toy_of
 from .age_rules import GRAMS_SALT_TO_MG_SODIUM
 from .customize import CustomizedItem, to_order_item
 from .planner import KidPlan, PlanResult
@@ -23,6 +24,8 @@ DISCLAIMER = (
 )
 OFFLINE_NOTICE = "离线演示：数据为 2026-10-12 用真实 Token 录制的上海黄浦华旭国际大厦餐厅午餐时段结果。"
 NO_PLAN_TEXT = "这家店当前菜单里没有能放进本餐钠预算的组合，可以换个门店或时间再试。"
+PLAY_HEADING = "饭后遛娃（高德，门店周边 2 公里）"
+PLAY_REMINDER = "出发前请留意开放时间与天气"
 
 
 def age_label(age_months: int) -> str:
@@ -106,6 +109,19 @@ def _alt_text(plan: KidPlan) -> str:
     return f"{plan.item.name}：{mains}；宝宝钠 {_total_prefix(plan)}{plan.kid_sodium_mg:.0f}mg（本餐预算 {plan.meal_pct}%）"
 
 
+def _activity_lines(result: PlanResult) -> list:
+    toy = toy_of(result.plans[0].item) if result.plans else None
+    lines = [f"随餐玩具：{toy}（开心乐园餐附赠，以门店实际发放为准）"] if toy else []
+    return lines + [f"亲子活动：{campaign.title}——{campaign.summary}" for campaign in result.campaigns]
+
+
+def _play_lines(result: PlanResult) -> list:
+    if not result.play_spots:
+        return []
+    return [f"{spot.name}（{spot.kind}）：步行约 {spot.walk_minutes} 分钟（{spot.walk_meters} 米）"
+            for spot in result.play_spots] + [PLAY_REMINDER]
+
+
 def render_markdown(result: PlanResult) -> str:
     out = ["# 小小麦门 · 带娃吃麦定制单", ""]
     if result.offline:
@@ -140,6 +156,9 @@ def render_markdown(result: PlanResult) -> str:
             out += ["## 备选", ""] + [f"- {_alt_text(p)}" for p in result.plans[1:]] + [""]
     if result.excluded:
         out += ["## 未推荐", ""] + [f"- {name}：{reason}" for name, reason in result.excluded] + [""]
+    for heading, lines in (("玩具与亲子活动", _activity_lines(result)), (PLAY_HEADING, _play_lines(result))):
+        if lines:
+            out += [f"## {heading}", ""] + [f"- {line}" for line in lines] + [""]
     if result.adult_suggestions:
         out += ["## 大人餐参考", ""]
         out += [f"- {m.name}" + (f" ¥{m.price_yuan:g}" if m.price_yuan is not None else "")
@@ -184,6 +203,10 @@ def plan_to_dict(result: PlanResult) -> dict:
                    "dailySaltG": result.budget.band.daily_salt_g, "source": result.budget.band.source},
         "plans": [plan_dict(p) for p in result.plans],
         "excluded": [{"name": n, "reason": r} for n, r in result.excluded],
+        "toy": toy_of(result.plans[0].item) if result.plans else None,
+        "campaigns": [{"date": c.date, "title": c.title, "summary": c.summary} for c in result.campaigns],
+        "playSpots": [{"name": s.name, "kind": s.kind, "walkMinutes": s.walk_minutes,
+                       "walkMeters": s.walk_meters, "address": s.address} for s in result.play_spots],
         "priceCents": result.price_cents,
         "remark": remark,
         "offline": result.offline,
@@ -244,6 +267,10 @@ def render_html(result: PlanResult) -> str:
         if len(result.plans) > 1:
             items = "".join(f"<li>{e(_alt_text(p))}</li>" for p in result.plans[1:])
             parts.append(f'<div class="card"><h2>备选</h2><ul>{items}</ul></div>')
+    for heading, lines in (("玩具与亲子活动", _activity_lines(result)), (PLAY_HEADING, _play_lines(result))):
+        if lines:
+            items = "".join(f"<li>{e(line)}</li>" for line in lines)
+            parts.append(f'<div class="card"><h2>{e(heading)}</h2><ul>{items}</ul></div>')
     tips = "".join(f"<li>{e(t)}</li>" for t in TIPS)
     parts += [
         f'<div class="card"><h2>温馨提示</h2><ul>{tips}</ul></div>',
