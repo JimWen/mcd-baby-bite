@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "mcd-mcp": {
+      "type": "streamablehttp",
+      "url": "https://mcp.mcd.cn",
+      "headers": {
+        "Authorization": "Bearer ${MCD_MCP_TOKEN}"
+      }
+    },
+    "amap-maps": {
+      "type": "streamablehttp",
+      "url": "https://mcp.amap.com/mcp?key=${AMAP_MAPS_API_KEY}"
+    },
+    "xiaohongshu-mcp": {
+      "type": "streamablehttp",
+      "url": "http://127.0.0.1:18060/mcp"
+    }
+  }
+}
