@@ -3627,6 +3627,7 @@ class NoteTest(unittest.TestCase):
         for phrase in BANNED_PHRASES:
             self.assertNotIn(phrase, note["content"])
         self.assertIn("宝宝外出吃饭", note["tags"])
+        self.assertIn("参考《中国居民膳食指南（2022）》", note["content"])  # 1-2 岁的依据
 
     def test_draft_lists_images(self):
         note = {"title": "t", "content": "c", "tags": ["a"]}
@@ -3874,7 +3875,7 @@ def build_note(saved: dict) -> dict:
         f"线上已去：{removed}（点单时选特制就能去掉）",
         f"宝宝吃：{mains}",
         f"这一餐宝宝的钠大约不超过 {top['kidSodiumMg']:.0f}mg，约占这个年龄每日建议上限的 {top['dayLimitPct']}%"
-        "（参考中国营养学会《家庭减盐行为指南》）。",
+        f"（参考{saved['budget']['source']}）。",
         "",
     ]
     if top.get("saltRequests"):
