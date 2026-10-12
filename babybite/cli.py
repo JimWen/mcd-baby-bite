@@ -5,6 +5,7 @@ import argparse
 import datetime as dt
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -13,15 +14,18 @@ from .age_rules import INFANT_ADVICE, band_for, parse_allergies, sodium_budget
 from .amap import (AMAP_MAX_STORES, WALK_MAX_MIN, Throttled, amap_client_from_env, geocode, navi_url,
                    nearby_play, route_for_store, store_location, weather_notice)
 from .cards import render_html, render_json, render_markdown
+from .checkin import render_checkin, validate_photo
 from .customize import to_order_item
 from .errors import AuthError, BabyBiteError, FixtureMissingError, McdBusinessError
+from .keepsake_html import ASSETS
+from .learn_cards import BABY_WORD, render_print_sheet, render_word_card, words_from_plan
 from .mcp_client import McpHttpClient, client_from_env
 from .menu import Store, parse_meal_detail, parse_menu, parse_stores
 from .nutrition import NutritionIndex, parse_nutrition_table
 from .planner import PlanResult, adult_suggestions, build_plans, rank_candidates
 from .phone_cards import age_rows, card_candidate_codes, render_age_card, render_staff_card
 from .share import DEFAULT_VISIBILITY, VISIBILITIES, build_note, default_client, publish, render_draft
-from .snapshot import find_browser, html_to_png
+from .snapshot import find_browser, html_to_pdf, html_to_png
 from .scenes import get_scene, store_args
 
 OFFLINE_WHEN = "2026-10-12 11:30"
@@ -86,6 +90,18 @@ def build_parser() -> argparse.ArgumentParser:
     share.add_argument("--publish", action="store_true")
     share.add_argument("--confirm", action="store_true")
     share.add_argument("--visibility", choices=VISIBILITIES, default=DEFAULT_VISIBILITY)
+
+    learn = sub.add_parser("learn", help="从保存的方案生成中英文教育卡片")
+    checkin = sub.add_parser("checkin", help="在本机合成宝宝打卡照片")
+    for command in (learn, checkin):
+        command.add_argument("--plan", required=True, help="plan --save 保存的方案 JSON")
+        command.add_argument("--photo", help="宝宝照片（JPG / JPEG / PNG / WebP / GIF，仅在本地使用）")
+        command.add_argument("--mascot", help="替换小麦芽的自有授权图片")
+    learn.add_argument("--out", default="learn-cards", help="教育卡片输出目录（默认 learn-cards）")
+    checkin.add_argument("--name", default="宝宝", help="宝宝昵称")
+    checkin.add_argument("--date", help="打卡日期 YYYY-MM-DD，默认预约日期或今天")
+    checkin.add_argument("--text", default="", help="打卡时想记录的一句话")
+    checkin.add_argument("--out", default="checkin.png", help="PNG 输出路径（同目录保留同名 HTML）")
     return parser
 
 
@@ -292,7 +308,8 @@ def cmd_plan(args, factory, out) -> int:
                                   _split(args.keep), args.kids)
     result = PlanResult(args.age_months, args.kids, args.adults, scene, store, when, budget, plans, excluded,
                         adult_suggestions(menu), offline=args.offline, notices=notices,
-                        address_id=args.address_id if scene.needs_address else None)
+                        address_id=args.address_id if scene.needs_address else None,
+                        images={m.code: m.image for m in menu if m.image})
     try:
         result.campaigns = kid_campaigns(client.call_tool("campaign-calendar", {}))
     except BabyBiteError:
@@ -425,8 +442,82 @@ def cmd_share(args, factory, out) -> int:
     return EXIT_OK
 
 
+def _keepsake_inputs(args):
+    saved = _read_plan_file(args.plan)
+    plans = saved.get("plans")
+    if not plans:
+        raise BabyBiteError("方案文件里没有可制作卡片的宝宝餐")
+    if not isinstance(plans, list) or not isinstance(plans[0], dict):
+        raise ValueError("方案文件的 plans 格式不正确，请用 plan --save 重新生成")
+    photo = validate_photo(args.photo) if args.photo is not None else None
+    mascot = validate_photo(args.mascot if args.mascot is not None else ASSETS / "mascot.png")
+    return saved, photo, mascot
+
+
+def _html_only_notice(out) -> None:
+    print("只输出了 HTML：未找到可用的 Chrome / Edge / Chromium，"
+          "可用环境变量 BABYBITE_BROWSER 指定浏览器路径。", file=out)
+
+
+def _render_keepsake_file(render, html_path, output_path, browser, out) -> None:
+    try:
+        if render(html_path, output_path, browser=browser):
+            print(f"卡片已保存：{output_path}", file=out)
+            return
+    except BabyBiteError as exc:
+        print(f"渲染失败：{exc}。", file=out)
+    print("已保留 HTML，可用本机浏览器打开后手动导出。", file=out)
+
+
+def cmd_learn(args, factory, out) -> int:
+    saved, photo, mascot = _keepsake_inputs(args)
+    cards = words_from_plan(saved)
+    if photo:
+        cards.append((BABY_WORD, photo))
+    if not cards:
+        raise BabyBiteError("主推方案中没有匹配的食物词卡，可通过 --photo 添加宝宝卡")
+    folder = Path(args.out)
+    folder.mkdir(parents=True, exist_ok=True)
+    sheet = folder / "learn-cards.html"
+    sheet.write_text(render_print_sheet(cards, mascot), encoding="utf-8")
+    print(f"教育卡片 HTML 已保存：{sheet}", file=out)
+    browser = find_browser()
+    if not browser:
+        _html_only_notice(out)
+        return EXIT_OK
+    _render_keepsake_file(html_to_pdf, sheet, folder / "learn-cards.pdf", browser, out)
+    with tempfile.TemporaryDirectory() as tmp:
+        for number, (word, uri) in enumerate(cards, 1):
+            stem = f"card-{number:02d}-{word.en.lower().replace(' ', '-')}"
+            page = Path(tmp) / f"{stem}.html"
+            page.write_text(render_word_card(word, uri, mascot), encoding="utf-8")
+            _render_keepsake_file(html_to_png, page, folder / f"{stem}.png", browser, out)
+    return EXIT_OK
+
+
+def cmd_checkin(args, factory, out) -> int:
+    saved, photo, mascot = _keepsake_inputs(args)
+    date = args.date if args.date is not None else (saved.get("reservationDate") or dt.date.today().isoformat())[:10]
+    try:
+        if len(date) != 10 or dt.date.fromisoformat(date).isoformat() != date:
+            raise ValueError
+    except ValueError:
+        raise ValueError("--date 需为有效日期，格式 YYYY-MM-DD") from None
+    target = Path(args.out)
+    page = target.with_suffix(".html")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(render_checkin(saved, args.name, date, args.text, photo, mascot), encoding="utf-8")
+    print(f"打卡 HTML 已保存：{page}", file=out)
+    browser = find_browser()
+    if browser:
+        _render_keepsake_file(html_to_png, page, target, browser, out)
+    else:
+        _html_only_notice(out)
+    return EXIT_OK
+
+
 COMMANDS = {"plan": cmd_plan, "stores": cmd_stores, "order": cmd_order, "verify": cmd_verify, "cancel": cmd_cancel,
-            "addresses": cmd_addresses, "share": cmd_share}
+            "addresses": cmd_addresses, "share": cmd_share, "learn": cmd_learn, "checkin": cmd_checkin}
 
 
 def main(argv=None, client_factory: Optional[Callable] = None, out=None,

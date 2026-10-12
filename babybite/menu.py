@@ -24,6 +24,7 @@ class MenuItem:
     name: str
     price_yuan: Optional[float]
     category: str
+    image: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class MealDetail:
     name: str
     rounds: tuple
     mod_groups: tuple
+    image: str = ""
 
 
 def _clean(text) -> str:
@@ -115,11 +117,13 @@ def parse_menu(payload: dict) -> list:
                 continue
             seen.add(code)
             meal = meals[code]
-            items.append(MenuItem(code, _clean(meal.get("name")), _price(meal.get("currentPrice")), cat_name))
+            items.append(MenuItem(code, _clean(meal.get("name")), _price(meal.get("currentPrice")),
+                                  cat_name, meal.get("image")))
     for code, meal in meals.items():  # 未归入任何分类的餐品
         if code not in seen:
             seen.add(code)
-            items.append(MenuItem(code, _clean(meal.get("name")), _price(meal.get("currentPrice")), ""))
+            items.append(MenuItem(code, _clean(meal.get("name")), _price(meal.get("currentPrice")),
+                                  "", meal.get("image")))
     return items
 
 
@@ -156,4 +160,4 @@ def parse_meal_detail(payload: dict) -> MealDetail:
         for r in data.get("rounds") or []
     )
     return MealDetail(str(data.get("code", "")), _clean(data.get("name")), rounds,
-                      _mod_groups(data.get("modification")))
+                      _mod_groups(data.get("modification")), data.get("image") or "")

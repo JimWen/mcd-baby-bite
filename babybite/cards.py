@@ -174,6 +174,7 @@ def plan_to_dict(result: PlanResult) -> dict:
         return {
             "name": plan.item.name,
             "productCode": plan.item.product_code,
+            "image": result.images.get(plan.item.product_code),
             "quantity": plan.item.quantity,
             "menuPriceYuan": plan.menu_price_yuan,
             "kidSodiumMg": round(plan.kid_sodium_mg, 1),
@@ -181,8 +182,10 @@ def plan_to_dict(result: PlanResult) -> dict:
             "dayLimitPct": plan.day_pct,
             "removed": list(plan.item.removed_all),
             "saltRequests": list(plan.item.salt_requests),
-            "components": [{"name": c.name, "role": c.role, "sodiumMg": c.sodium_mg,
-                            "portion": round(c.portion, 3), "note": c.note} for c in plan.components],
+            "components": [{"name": c.name, "code": line.code, "image": result.images.get(line.code),
+                            "role": c.role, "sodiumMg": c.sodium_mg,
+                            "portion": round(c.portion, 3), "note": c.note}
+                           for line, c in zip(plan.item.lines, plan.components)],
             "unknownNutrition": list(plan.unknown_nutrition),
             "staffScript": staff_script(plan.item, result.age_months),
             "orderItem": to_order_item(plan.item),

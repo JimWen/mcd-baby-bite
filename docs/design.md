@@ -265,11 +265,41 @@ python3 -m babybite cancel --order-id <id> [--reason 1]
 - 高德免费 Key 有 QPS 限制（实测连续调用返回 `CUQPS_HAS_EXCEEDED_THE_LIMIT`）：在线客户端外包一层节流（两次调用间隔至少 0.35 秒），遇到该错误退避 1 秒后重试，总共最多尝试 3 次
 - 输出：Markdown 新增"## 饭后遛娃（高德，门店周边 2 公里）"，每行"- {名称}（{类型}）：步行约 {分钟} 分钟（{米} 米）"；JSON 新增 `playSpots`
 
-### 11.4 打卡照片与教育卡片（下一批，素材生成后实现）
+### 11.4 打卡照片与教育卡片
 
 - 吉祥物使用原创形象"小麦芽"（`babybite/assets/mascot.png`，由图像模型生成的原创插画），**不使用麦当劳官方吉祥物与商标**；`--mascot` 允许用户替换为自有授权图片
 - 实物图：运行时使用菜单接口返回的官方图片链接（不入库）；无图时用原创食物插画（`babybite/assets/food/*.png`）兜底
 - 宝宝照片只在本地合成，不上传
+
+**数据**：`MenuItem` 增加 `image`（菜单 `meals[code].image`），`MealDetail` 增加 `image`（套餐详情 `data.image`），二者默认为 None / ""；`PlanResult.images: dict`（菜单 code → 图片链接）。`plan_to_dict` 的每个方案增加 `image`（套餐图），每个 component 增加 `code` 与 `image`（菜单中有该 code 时）。
+
+**教育卡片（`babybite/learn_cards.py`，命令 `learn`）**
+- 词表 `VOCAB`（按顺序匹配，名称包含任一关键词即命中）：
+
+| 关键词 | 中文 | 拼音 | English | 例句 | 插画 |
+|---|---|---|---|---|---|
+| 鱼 | 鱼 | yú | fish | 小鱼在水里游。 / Fish swim in the water. | fish |
+| 麦乐鸡、鸡块 | 鸡块 | jī kuài | chicken nuggets | 鸡块小小的。 / The nuggets are small. | nuggets |
+| 麦满分、松饼 | 松饼 | sōng bǐng | muffin | 早上吃松饼。 / I eat a muffin in the morning. | muffin |
+| 鸡腿、板烧、鸡 | 鸡肉 | jī ròu | chicken | 鸡肉香香的。 / The chicken smells good. | hamburger |
+| 汉堡、堡 | 汉堡 | hàn bǎo | hamburger | 我吃汉堡。 / I eat a hamburger. | hamburger |
+| 薯条 | 薯条 | shǔ tiáo | French fries | 我和爸爸分薯条。 / I share fries with Dad. | fries |
+| 玉米 | 玉米 | yù mǐ | corn | 玉米黄黄的。 / The corn is yellow. | corn |
+| 苹果汁、果汁 | 果汁 | guǒ zhī | juice | 果汁甜甜的。 / The juice is sweet. | apple |
+| 苹果 | 苹果 | píng guǒ | apple | 苹果甜甜的。 / The apple is sweet. | apple |
+| 牛奶 | 牛奶 | niú nǎi | milk | 我爱喝牛奶。 / I like milk. | milk |
+| 纯悦、水 | 水 | shuǐ | water | 我喝水。 / I drink water. | water |
+
+- 取主推方案中非"不计入"的子项，按词表去重；提供 `--photo` 时额外生成"宝宝 / bǎo bao / baby / 这是我！ / This is me!"卡（图为宝宝照片）
+- 图片优先级：官方实物图（https 链接）> 原创插画
+- 输出：`learn-cards.html`（A4 打印版，每页 2×2 四张，带裁切虚线）、`learn-cards.pdf`（有浏览器时）、单张 `card-NN-<english>.png`（NN 从 01 起；english 转小写、空格换成连字符，如 `card-02-french-fries.png`；1080×1440，有浏览器时）
+
+**打卡照片（`babybite/checkin.py`，命令 `checkin`）**
+- 参数：`--plan`、`--photo`（可选，JPG/PNG/WebP/GIF；HEIC 等提示先转换）、`--name`（默认"宝宝"）、`--date`（默认方案预约日期，否则今天）、`--text`（可选一句话）、`--mascot`（可选替换）、`--out`（PNG 路径，同目录写 HTML）
+- 版式（1080×1440）：暖色背景与点状 / 彩纸图案，散落半透明的食物插画；标题"{name}的麦麦打卡"；"{日期} · {年龄}"；拍立得样式照片（无照片时以吉祥物为主图）；套餐图与名称；"今天吃了：{宝宝实际吃的子项}"（主食写份量如"汉堡包 1/4 份"，整份配菜饮品只写名称，薯条与玩具不列，用"、"连接）；有去料或减盐诉求时显示"去料减盐 宝宝版"徽章；自定义文案；吉祥物与气泡"偶尔吃，吃得明白！"；页脚"mcd-baby-bite · 非麦当劳官方"
+- 照片只在本地渲染，不上传
+
+**渲染**：`snapshot.html_to_pdf(html, pdf, browser=None, timeout=60) -> bool` 使用 `--print-to-pdf` 与 `--no-pdf-header-footer`，与截图共用"文件写出且大小稳定即成功"的轮询逻辑
 
 ### 11.5 不做的需求
 
