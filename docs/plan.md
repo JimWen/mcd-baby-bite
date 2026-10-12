@@ -2338,6 +2338,7 @@ import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 from babybite.cli import EXIT_AUTH, EXIT_BUSINESS, EXIT_ERROR, EXIT_OK, EXIT_USAGE, main
@@ -2349,7 +2350,8 @@ GOLDEN = Path(__file__).resolve().parent / "golden" / "plan_18m_offline.md"
 
 def run(argv, factory=None):
     out = io.StringIO()
-    code = main(argv, client_factory=factory, out=out)
+    with redirect_stderr(io.StringIO()):
+        code = main(argv, client_factory=factory, out=out)
     return code, out.getvalue()
 
 
@@ -2468,6 +2470,28 @@ class OrderCommandTest(unittest.TestCase):
             code, _ = run(["cancel", "--order-id", "T1"], lambda offline: client)
             self.assertEqual(code, EXIT_OK)
             self.assertEqual(client.calls[-1], ("cancel-order", {"orderId": "T1", "cancelReasonCode": "1"}))
+
+
+class FileErrorTest(unittest.TestCase):
+    def test_missing_plan_file(self):
+        self.assertEqual(run(["order", "--plan", "/nonexistent/plan.json"], forbid)[0], EXIT_USAGE)
+
+    def test_invalid_json_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad.json"
+            path.write_text("{oops", "utf-8")
+            self.assertEqual(run(["order", "--plan", str(path)], forbid)[0], EXIT_USAGE)
+            self.assertEqual(run(["verify", "--order-id", "T1", "--plan", str(path)], forbid)[0], EXIT_USAGE)
+
+    def test_plan_missing_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "p.json"
+            path.write_text(json.dumps({"plans": [{"name": "x"}]}), "utf-8")
+            self.assertEqual(run(["order", "--plan", str(path)], forbid)[0], EXIT_USAGE)
+
+    def test_unwritable_card_path(self):
+        code, _ = run(["plan", "--age-months", "18", "--offline", "--card", "/nonexistent-dir/x.html"])
+        self.assertEqual(code, EXIT_ERROR)
 
 
 class StoresCommandTest(unittest.TestCase):
@@ -2663,12 +2687,28 @@ def cmd_stores(args, factory, out) -> int:
     return EXIT_OK
 
 
+def _read_plan_file(path: str) -> dict:
+    try:
+        data = json.loads(Path(path).read_text("utf-8"))
+    except OSError as exc:
+        raise ValueError(f"无法读取方案文件 {path}：{exc.strerror or exc}") from None
+    except json.JSONDecodeError:
+        raise ValueError(f"方案文件 {path} 不是有效的 JSON，请用 plan --save 重新生成") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"方案文件 {path} 格式不正确，请用 plan --save 重新生成")
+    return data
+
+
 def _load_plan(path: str) -> dict:
-    saved = json.loads(Path(path).read_text("utf-8"))
+    saved = _read_plan_file(path)
     if not saved.get("plans"):
         raise BabyBiteError("方案文件里没有可下单的宝宝餐")
     if saved.get("offline"):
         raise BabyBiteError("这是离线演示方案，不能用于真实下单，请去掉 --offline 重新生成")
+    store, top = saved.get("store"), saved["plans"][0]
+    if not saved.get("scene") or not isinstance(store, dict) or not store.get("code") \
+            or not isinstance(top, dict) or not top.get("orderItem"):
+        raise ValueError("方案文件缺少 scene / store.code / plans[0].orderItem，请用 plan --save 重新生成")
     return saved
 
 
@@ -2703,11 +2743,11 @@ def cmd_order(args, factory, out) -> int:
 
 
 def cmd_verify(args, factory, out) -> int:
+    saved = _read_plan_file(args.plan) if args.plan else None
     payload = factory(False).call_tool("query-order", {"orderId": args.order_id})
     text = json.dumps(payload.get("data"), ensure_ascii=False)
     print(text if len(text) <= VERIFY_PRINT_LIMIT else text[:VERIFY_PRINT_LIMIT] + "…", file=out)
-    if args.plan:
-        saved = json.loads(Path(args.plan).read_text("utf-8"))
+    if saved is not None:
         removed = (saved.get("plans") or [{}])[0].get("removed") or []
         found = [name for name in removed if name in text]
         missing = [name for name in removed if name not in text]
@@ -2744,6 +2784,9 @@ def main(argv=None, client_factory: Optional[Callable] = None, out=None) -> int:
         return EXIT_USAGE
     except BabyBiteError as exc:
         print(f"错误：{exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except OSError as exc:
+        print(f"错误：文件读写失败：{exc}", file=sys.stderr)
         return EXIT_ERROR
 ```
 
@@ -3808,7 +3851,7 @@ def publish(note: dict, images: list, visibility: str = DEFAULT_VISIBILITY, clie
 
 ```python
 def cmd_share(args, factory, out) -> int:
-    saved = json.loads(Path(args.plan).read_text("utf-8"))
+    saved = _read_plan_file(args.plan)
     if not saved.get("plans"):
         raise BabyBiteError("方案文件里没有可分享的宝宝餐")
     note = build_note(saved)
