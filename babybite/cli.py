@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import sys
 from pathlib import Path
 from typing import Callable, Optional
 
 from .age_rules import INFANT_ADVICE, band_for, parse_allergies, sodium_budget
+from .amap import (AMAP_MAX_STORES, WALK_MAX_MIN, amap_client_from_env, geocode, navi_url,
+                   route_for_store, weather_notice)
 from .cards import render_html, render_json, render_markdown
 from .customize import to_order_item
 from .errors import AuthError, BabyBiteError, FixtureMissingError, McdBusinessError
@@ -39,6 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--address-id", help="外送地址 ID（见 addresses 命令）")
     plan.add_argument("--city")
     plan.add_argument("--keyword", help="位置关键词，如 人民广场")
+    plan.add_argument("--from", dest="origin",
+                      help="出发地点，用高德计算步行到店时间并给出天气提醒（需 AMAP_MAPS_API_KEY）")
     plan.add_argument("--store", help="门店编码（跳过门店搜索）")
     plan.add_argument("--be-code", help="得来速门店的 beCode")
     plan.add_argument("--when", help="预约时间 yyyy-MM-dd HH:mm")
@@ -86,11 +91,11 @@ def _split(text: Optional[str]) -> tuple:
     return tuple(t.strip() for t in (text or "").replace("，", ",").split(",") if t.strip())
 
 
-def _resolve_store(client, scene, args, when) -> Store:
+def _usable_stores(client, scene, args, when) -> list:
     if args.store:
         if scene.needs_be_code and not args.be_code:
             raise ValueError(f"{scene.label}指定门店时需要同时提供 --be-code")
-        return Store(args.store, f"门店 {args.store}", "", None, True, "-", args.be_code, bool(when), ())
+        return [Store(args.store, f"门店 {args.store}", "", None, True, "-", args.be_code, bool(when), ())]
     city = args.city or (OFFLINE_CITY if args.offline else None)
     keyword = args.keyword or (OFFLINE_KEYWORD if args.offline else None)
     if not city or not keyword:
@@ -102,7 +107,38 @@ def _resolve_store(client, scene, args, when) -> Store:
     usable = [s for s in stores if (s.reservation if when else s.open_now)]
     if not usable:
         raise BabyBiteError("附近门店当前都不在营业时间" + CLOSED_HINT)
-    return usable[0]
+    return usable
+
+
+def _pick_store_with_amap(stores, args, when, notices):
+    client = args.amap_factory(args.offline)
+    if client is None:
+        notices.append("未配置 AMAP_MAPS_API_KEY，已跳过高德步行与天气提醒。")
+        return stores[0]
+    city = args.city or OFFLINE_CITY
+    try:
+        weather = weather_notice(client, city, (when or dt.date.today().isoformat())[:10])
+        if weather:
+            notices.append(weather)
+        origin = geocode(client, args.origin, city)
+        if not origin:
+            notices.append(f"高德没有找到出发地点「{args.origin}」，已按麦当劳门店距离选择。")
+            return stores[0]
+        routes = [(s, route_for_store(client, s, origin, city)) for s in stores[:AMAP_MAX_STORES]]
+        store, route = sorted(routes, key=lambda x: (x[1].walk_minutes is None, x[1].walk_minutes or 0))[0]
+        if route.walk_minutes is not None:
+            text = f"高德步行：从「{args.origin}」到 {route.poi_name} 约 {route.walk_minutes} 分钟（{route.walk_meters} 米）。"
+            if route.walk_minutes > WALK_MAX_MIN:
+                text += "步行较远，带娃可以考虑得来速或麦乐送。"
+            notices.append(text)
+        if route.location:
+            link = navi_url(client, route.location)
+            if link:
+                notices.append(f"高德导航：{link}")
+        return store
+    except BabyBiteError as exc:
+        notices.append(f"高德服务暂不可用（{exc}），已按麦当劳门店距离选择。")
+        return stores[0]
 
 
 def _mask(text: str, keep: int = 2) -> str:
@@ -205,14 +241,18 @@ def cmd_plan(args, factory, out) -> int:
     if scene.needs_address and not args.address_id:
         raise ValueError("麦乐送需要 --address-id，可先运行 addresses 命令查看")
     client = factory(args.offline)
+    notices = []
     when = args.when or (OFFLINE_WHEN if args.offline else None)
-    store = (_resolve_delivery_store(client, scene, args.address_id) if scene.needs_address
-             else _resolve_store(client, scene, args, when))
+    if scene.needs_address:
+        store = _resolve_delivery_store(client, scene, args.address_id)
+    else:
+        stores = _usable_stores(client, scene, args, when)
+        store = _pick_store_with_amap(stores, args, when, notices) if args.origin else stores[0]
+    details = {}
     base = store_args(scene, store.code, store.be_code, when)
     menu = parse_menu(client.call_tool("query-meals", base))
     index = NutritionIndex(parse_nutrition_table(client.call_tool("list-nutrition-foods", {}).get("data") or ""))
     candidates = rank_candidates(menu, args.age_months, allergies)
-    notices, details = [], {}
     for item in candidates:
         try:
             details[item.code] = parse_meal_detail(client.call_tool("query-meal-detail", dict(base, code=item.code)))
@@ -354,10 +394,11 @@ COMMANDS = {"plan": cmd_plan, "stores": cmd_stores, "order": cmd_order, "verify"
 
 
 def main(argv=None, client_factory: Optional[Callable] = None, out=None,
-         xhs_factory: Optional[Callable] = None) -> int:
+         xhs_factory: Optional[Callable] = None, amap_factory: Optional[Callable] = None) -> int:
     out = out or sys.stdout
     args = build_parser().parse_args(argv)
     args.xhs_factory = xhs_factory or default_client
+    args.amap_factory = amap_factory or amap_client_from_env
     factory = client_factory or (lambda offline: client_from_env(offline=offline))
     try:
         return COMMANDS[args.command](args, factory, out)
