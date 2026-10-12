@@ -94,6 +94,9 @@ def _price_text(plan: KidPlan, price_cents: Optional[int]) -> str:
 
 
 def _summary(plan: KidPlan) -> str:
+    if plan.unknown_nutrition:
+        return (f"已知项钠小计约 {plan.kid_sodium_mg:.0f}mg；"
+                f"{'、'.join(plan.unknown_nutrition)}无官方营养数据，本餐总量无法确认。")
     return (f"本餐宝宝钠合计 {_total_prefix(plan)}{plan.kid_sodium_mg:.0f}mg，约占本餐预算 {plan.meal_pct}%、"
             f"全天上限 {plan.day_pct}%。")
 
@@ -106,6 +109,8 @@ def _budget_text(result: PlanResult) -> str:
 
 def _alt_text(plan: KidPlan) -> str:
     mains = "、".join(f"{c.name} {c.note}" for c in plan.components if c.role == "main")
+    if plan.unknown_nutrition:
+        return f"{plan.item.name}：{mains}；{_summary(plan)}"
     return f"{plan.item.name}：{mains}；宝宝钠 {_total_prefix(plan)}{plan.kid_sodium_mg:.0f}mg（本餐预算 {plan.meal_pct}%）"
 
 
@@ -177,9 +182,10 @@ def plan_to_dict(result: PlanResult) -> dict:
             "image": result.images.get(plan.item.product_code),
             "quantity": plan.item.quantity,
             "menuPriceYuan": plan.menu_price_yuan,
-            "kidSodiumMg": round(plan.kid_sodium_mg, 1),
-            "mealBudgetPct": plan.meal_pct,
-            "dayLimitPct": plan.day_pct,
+            "kidSodiumMg": None if plan.unknown_nutrition else round(plan.kid_sodium_mg, 1),
+            "knownSodiumSubtotalMg": round(plan.kid_sodium_mg, 1),
+            "mealBudgetPct": None if plan.unknown_nutrition else plan.meal_pct,
+            "dayLimitPct": None if plan.unknown_nutrition else plan.day_pct,
             "removed": list(plan.item.removed_all),
             "saltRequests": list(plan.item.salt_requests),
             "components": [{"name": c.name, "code": line.code, "image": result.images.get(line.code),

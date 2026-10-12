@@ -20,14 +20,19 @@ def build_note(saved: dict) -> dict:
     age = age_label(saved["ageMonths"]).replace(" ", "")
     mains = "、".join(f"{c['name']} {c['note']}" for c in top["components"] if c["role"] == "main")
     removed = "、".join(top.get("removed") or []) or "无"
+    if top.get("unknownNutrition") or top.get("kidSodiumMg") is None:
+        sodium_note = "部分餐品无官方营养数据，本餐钠总量无法确认，不能据此判断是否符合预算。"
+    else:
+        sodium_note = (f"这一餐宝宝的钠大约不超过 {top['kidSodiumMg']:.0f}mg，"
+                       f"约占这个年龄每日建议上限的 {top['dayLimitPct']}%"
+                       f"（参考{saved['budget']['source']}）。")
     lines = [
         f"带{age}的宝宝去麦当劳，我是这样点的：",
         "",
         f"套餐：{top['name']}",
         f"线上已去：{removed}（点单时选特制就能去掉）",
         f"宝宝吃：{mains}",
-        f"这一餐宝宝的钠大约不超过 {top['kidSodiumMg']:.0f}mg，约占这个年龄每日建议上限的 {top['dayLimitPct']}%"
-        f"（参考{saved['budget']['source']}）。",
+        sodium_note,
         "",
     ]
     if top.get("saltRequests"):

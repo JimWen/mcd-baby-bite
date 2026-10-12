@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -373,6 +374,10 @@ def cmd_order(args, factory, out) -> int:
     client = factory(False)
     data = client.call_tool("calculate-price", dict(base, items=items)).get("data") or {}
     price = data.get("price")
+    valid_price = (isinstance(price, int) and not isinstance(price, bool) and price >= 0) or (
+        isinstance(price, float) and math.isfinite(price) and price >= 0 and price.is_integer())
+    if not valid_price:
+        raise BabyBiteError("实时核价未返回有效金额，已中止操作，请稍后重新核价")
     print(f"门店：{store['name']}；餐品：{top['name']} × {top['quantity']}", file=out)
     print(f"实时核价：¥{price / 100:.2f}" if isinstance(price, (int, float)) else "实时核价：未返回金额", file=out)
     print("线上去料：" + ("、".join(top.get("removed") or []) or "无"), file=out)

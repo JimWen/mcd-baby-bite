@@ -103,10 +103,12 @@ def render_age_card(rows: list, store_name: str, when: Optional[str]) -> str:
         else:
             mains = "、".join(f"{c.name} {c.note}" for c in row.plan.components if c.role == "main")
             removed = "、".join(row.plan.item.removed_all) or "无需去料"
+            sodium_text = ("无官方营养数据，本餐钠总量无法确认" if row.plan.unknown_nutrition else
+                           f"本餐宝宝钠 ≤{row.plan.kid_sodium_mg:.0f}mg / 预算 {row.meal_sodium_mg}mg")
             info = (f'<div class="dish">{e(row.plan.item.name)}</div>'
                     f'<div class="line">宝宝吃：{e(mains)}</div>'
                     f'<div class="line">线上去：{e(removed)}</div>'
-                    f'<div class="line">本餐宝宝钠 ≤{row.plan.kid_sodium_mg:.0f}mg / 预算 {row.meal_sodium_mg}mg</div>')
+                    f'<div class="line">{e(sodium_text)}</div>')
         blocks.append(f'<div class="row"><div class="age"><b>{e(row.band_label)}</b>'
                       f'<span>每天盐 ≤{row.daily_salt_g:g}g</span></div><div class="info">{info}</div></div>')
     when_text = f" · {when}" if when else ""

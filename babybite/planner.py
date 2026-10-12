@@ -23,7 +23,7 @@ MAX_PLANS = 3
 CUSTOMIZE_BONUS = 0.05  # 每去掉一种配料 / 每条减盐诉求：实际钠低于官方整份数值
 ADULT_CATEGORY_WORDS = ("精选单人餐", "人气热卖")
 FRIES_NOTE = "建议大人吃，宝宝最多尝 2-3 根"
-UNKNOWN_NOTE = "无官方营养数据，未计入钠合计，建议先给 1/2 份"
+UNKNOWN_NOTE = "无官方营养数据，无法据此计算份量"
 TEXTURE_MAX_AGE_MONTHS = 48
 SIDE_TEXTURE_RULES = (  # 名称关键词、排除关键词、整份配菜的处理备注
     ("玉米", (), "整份，压碎后再给（整粒玉米有噎食风险）"),
@@ -119,7 +119,7 @@ def plan_for_item(item: CustomizedItem, index: NutritionIndex, budget: SodiumBud
         elif role == "skip":
             components.append(Component(line.name, role, None, 0.0, "不计入"))
         elif sodium is None:
-            components.append(Component(line.name, role, None, 0.5, UNKNOWN_NOTE))
+            components.append(Component(line.name, role, None, 0.0, UNKNOWN_NOTE))
         else:
             portion = floor_portion(per_main / sodium) if sodium > 0 else 1.0
             if portion is None:
@@ -164,6 +164,10 @@ def build_plans(candidates: list, details: dict, index: NutritionIndex, budget: 
         plan = plan_for_item(item, index, budget, menu_item.price_yuan, age_months=age_months)
         if plan is None:
             excluded.append((menu_item.name, "即使只吃 1/4 份也会超出本餐钠预算"))
+            continue
+        if plan.unknown_nutrition:
+            excluded.append((menu_item.name, "无官方营养数据：" + "、".join(plan.unknown_nutrition)
+                             + "；总量无法确认，未纳入推荐"))
             continue
         plans.append(plan)
     plans.sort(key=lambda p: -p.score)

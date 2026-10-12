@@ -189,12 +189,14 @@ class McpHttpClient:
                         continue
                     raise RateLimitError("触发限流（HTTP 429），请稍后再试") from None
                 raise TransportError(f"HTTP {exc.code}：{detail}") from None
-            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as exc:
+            except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
+                    http.client.HTTPException) as exc:
                 if attempt < attempts:
                     self._sleep(delay)
                     delay *= 2
                     continue
-                raise TransportError(self._mask(f"网络错误：{exc}")) from None
+                hint = "" if retry else "；操作结果可能不确定，请先在官方渠道核对状态，勿自动重试"
+                raise TransportError(self._mask(f"网络错误：{exc}{hint}")) from None
         raise TransportError("请求失败")  # pragma: no cover
 
 
