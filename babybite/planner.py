@@ -24,6 +24,11 @@ CUSTOMIZE_BONUS = 0.05  # 每去掉一种配料 / 每条减盐诉求：实际钠
 ADULT_CATEGORY_WORDS = ("精选单人餐", "人气热卖")
 FRIES_NOTE = "建议大人吃，宝宝最多尝 2-3 根"
 UNKNOWN_NOTE = "无官方营养数据，未计入钠合计，建议先给 1/2 份"
+TEXTURE_MAX_AGE_MONTHS = 48
+SIDE_TEXTURE_RULES = (  # 名称关键词、排除关键词、整份配菜的处理备注
+    ("玉米", (), "整份，压碎后再给（整粒玉米有噎食风险）"),
+    ("苹果", ("苹果汁",), "整份，切成细丝或刮泥再给（生苹果较硬）"),
+)
 
 
 def floor_portion(ratio: float) -> Optional[float]:
@@ -51,6 +56,14 @@ def _portion_note(name: str, portion: float) -> str:
         pieces = max(1, round(int(match.group(1)) * portion))
         return f"{label}（约 {pieces} 块）"
     return label
+
+
+def _side_note(name: str, age_months: Optional[int]) -> str:
+    if age_months is not None and age_months < TEXTURE_MAX_AGE_MONTHS:
+        for word, excluded, note in SIDE_TEXTURE_RULES:
+            if word in name and not any(w in name for w in excluded):
+                return note
+    return "整份"
 
 
 @dataclass(frozen=True)
@@ -86,7 +99,7 @@ class KidPlan:
 
 
 def plan_for_item(item: CustomizedItem, index: NutritionIndex, budget: SodiumBudget,
-                  menu_price_yuan: Optional[float] = None) -> Optional[KidPlan]:
+                  menu_price_yuan: Optional[float] = None, age_months: Optional[int] = None) -> Optional[KidPlan]:
     """配菜饮品整份计入，剩余预算平均分给主食；任一主食不足 1/4 份时返回 None。"""
     rows = []
     for line in item.lines:
@@ -100,7 +113,7 @@ def plan_for_item(item: CustomizedItem, index: NutritionIndex, budget: SodiumBud
     components = []
     for line, role, sodium in rows:
         if role == "side":
-            components.append(Component(line.name, role, sodium, 1.0, "整份"))
+            components.append(Component(line.name, role, sodium, 1.0, _side_note(line.name, age_months)))
         elif role == "fries":
             components.append(Component(line.name, role, sodium, 0.0, FRIES_NOTE))
         elif role == "skip":
@@ -148,7 +161,7 @@ def build_plans(candidates: list, details: dict, index: NutritionIndex, budget: 
         if bad:
             excluded.append((menu_item.name, f"含不适合宝宝的子项：{'、'.join(bad)}"))
             continue
-        plan = plan_for_item(item, index, budget, menu_item.price_yuan)
+        plan = plan_for_item(item, index, budget, menu_item.price_yuan, age_months=age_months)
         if plan is None:
             excluded.append((menu_item.name, "即使只吃 1/4 份也会超出本餐钠预算"))
             continue
